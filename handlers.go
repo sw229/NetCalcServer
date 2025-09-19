@@ -1,151 +1,50 @@
 package main
 
 import (
-	"errors"
-	"fmt"
-	"math"
+	"encoding/base64"
+	"io"
+	"log"
 	"net/http"
-	"time"
 )
 
-func registerUserHandler(w http.ResponseWriter, r *http.Request) {
+func loginHandler(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func addHandler(w http.ResponseWriter, r *http.Request) {
-	record := LogRecord{
-		DateTime: time.Now(),
-		OpType:   "add",
-	}
-	x, y, err := decodeTwoOperands(r)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		record.Error = err
-		logOperation(record)
-		return
-	}
-	result := x + y
-	fmt.Fprint(w, result)
-	record.OperandX = x
-	record.OperandY = y
-	record.Result = result
-	record.Success = true
-	logOperation(record)
+func registerHandler(w http.ResponseWriter, r *http.Request) {
+
 }
 
-func subHandler(w http.ResponseWriter, r *http.Request) {
-	record := LogRecord{
-		DateTime: time.Now(),
-		OpType:   "sub",
-	}
-	x, y, err := decodeTwoOperands(r)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		record.Error = err
-		logOperation(record)
+func calcHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		log.Println("Bad request")
 		return
 	}
-	result := x - y
-	fmt.Fprint(w, result)
-	record.OperandX = x
-	record.OperandY = y
-	record.Result = result
-	record.Success = true
-	logOperation(record)
-}
+	defer r.Body.Close()
+	encodedExp := r.URL.Query().Get("exp")
+	if encodedExp == "" {
+		http.Error(w, "exp parameter missing", http.StatusBadRequest)
+		log.Println("exp parameter missing")
+		return
+	}
 
-func mulHandler(w http.ResponseWriter, r *http.Request) {
-	record := LogRecord{
-		DateTime: time.Now(),
-		OpType:   "mul",
-	}
-	x, y, err := decodeTwoOperands(r)
+	expBytes, err := base64.URLEncoding.DecodeString(encodedExp)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		record.Error = err
-		logOperation(record)
+		http.Error(w, "Expression could not be decoded correctly", http.StatusBadRequest)
+		log.Println("Expression could not be decoded correctly")
 		return
 	}
-	result := x * y
-	fmt.Fprint(w, result)
-	record.OperandX = x
-	record.OperandY = y
-	record.Result = result
-	record.Success = true
-	logOperation(record)
-}
-
-func divHandler(w http.ResponseWriter, r *http.Request) {
-	record := LogRecord{
-		DateTime: time.Now(),
-		OpType:   "div",
-	}
-	x, y, err := decodeTwoOperands(r)
+	exp := string(expBytes)
+	result, err := calcExpression(exp)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		record.Error = err
-		logOperation(record)
+		http.Error(w, "Invalid expression", http.StatusBadRequest)
+		log.Println("Invalid expression")
 		return
 	}
-	if y == 0 {
-		http.Error(w, "err_zero_div", http.StatusBadRequest)
-		record.Error = errors.New("err_zero_div")
-		logOperation(record)
-		return
+	log.Println("Calculated expression:", exp, "result:", result)
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	if _, err := io.WriteString(w, result); err != nil {
+		log.Println(err)
 	}
-	result := x / y
-	fmt.Fprint(w, result)
-	record.OperandX = x
-	record.OperandY = y
-	record.Result = result
-	record.Success = true
-	logOperation(record)
-}
-
-func powHandler(w http.ResponseWriter, r *http.Request) {
-	record := LogRecord{
-		DateTime: time.Now(),
-		OpType:   "pow",
-	}
-	x, y, err := decodeTwoOperands(r)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		record.Error = err
-		logOperation(record)
-		return
-	}
-	result := math.Pow(x, y)
-	fmt.Fprint(w, result)
-	record.OperandX = x
-	record.OperandY = y
-	record.Result = result
-	record.Success = true
-	logOperation(record)
-}
-
-func rootHandler(w http.ResponseWriter, r *http.Request) {
-	record := LogRecord{
-		DateTime: time.Now(),
-		OpType:   "root",
-	}
-	x, y, err := decodeTwoOperands(r)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		record.Error = err
-		logOperation(record)
-		return
-	}
-	if y == 0 {
-		http.Error(w, "err_invalid_root", http.StatusBadRequest)
-		record.Error = errors.New("err_invalid_root")
-		logOperation(record)
-		return
-	}
-	result := math.Pow(x, 1/y)
-	fmt.Fprint(w, result)
-	record.OperandX = x
-	record.OperandY = y
-	record.Result = result
-	record.Success = true
-	logOperation(record)
 }
