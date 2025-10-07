@@ -1,8 +1,8 @@
 build:
-	@go build -o bin/net_calc_server
+	@go build -o bin/netcalcsrv
 
 run: build
-	@./bin/net_calc_server
+	@./bin/netcalcsrv
 
 test:
 	@go test -v ./...

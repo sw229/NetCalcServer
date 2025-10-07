@@ -4,26 +4,27 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/Knetic/govaluate"
 )
 
 // TODO:
-// ADD PASSWORD CHECK
+// Add authentication and admin functionality
+// Add logging
+// Add ability to get database credentials from environment variables
+// Add ability to specify custom port for database
+// Rewrite processArgs to use flag package
+// use toml or something like that for config file
+// LogToFile setting is unnecessary, log file has to be used only if path to is it given
+// Maybe split program into packages
 
 func main() {
-	settings := Settings{
-		LogLevel:   3,
-		LogToFile:  false,
-		DBName:     "net_calc_db",
-		DBUsername: "root",
-		DBPassword: "10740",
-	}
+	settings := genSettings()
 	db, err := initDB(settings)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Print(db)
 
 	http.HandleFunc("/register", newRegisterHandler(&settings, db))
 	http.HandleFunc("/login", newLoginHandler(&settings, db))
@@ -41,8 +42,15 @@ func calcExpression(expression string) (string, error) {
 		return "", err
 	}
 	result, err := govalExp.Evaluate(nil)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "ERROR: calcExpression:", err)
+	}
 	if fmt.Sprint(result) == "<nil>" {
 		return "", nil
 	}
 	return fmt.Sprint(result), nil
+}
+
+func Ptr[T any](v T) *T {
+	return &v
 }

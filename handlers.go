@@ -24,7 +24,7 @@ func newCalcHandler(settings *Settings) func(w http.ResponseWriter, r *http.Requ
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Bad request", http.StatusBadRequest)
-			if settings.LogLevel >= 1 {
+			if *settings.LogLevel >= 1 {
 				log.Println("Bad request")
 			}
 			return
@@ -33,7 +33,7 @@ func newCalcHandler(settings *Settings) func(w http.ResponseWriter, r *http.Requ
 		encodedExp := r.URL.Query().Get("exp")
 		if encodedExp == "" {
 			http.Error(w, "exp parameter missing", http.StatusBadRequest)
-			if settings.LogLevel >= 1 {
+			if *settings.LogLevel >= 1 {
 				log.Println("exp parameter missing")
 			}
 			return
@@ -42,7 +42,7 @@ func newCalcHandler(settings *Settings) func(w http.ResponseWriter, r *http.Requ
 		expBytes, err := base64.URLEncoding.DecodeString(encodedExp)
 		if err != nil {
 			http.Error(w, "Expression could not be decoded correctly", http.StatusBadRequest)
-			if settings.LogLevel >= 1 {
+			if *settings.LogLevel >= 1 {
 				log.Println("Expression could not be decoded correctly")
 			}
 			return
@@ -51,7 +51,7 @@ func newCalcHandler(settings *Settings) func(w http.ResponseWriter, r *http.Requ
 		result, err := calcExpression(exp)
 		if err != nil {
 			http.Error(w, "Invalid expression", http.StatusBadRequest)
-			if settings.LogLevel >= 1 {
+			if *settings.LogLevel >= 1 {
 				log.Println("Invalid expression")
 			}
 			return
@@ -59,7 +59,7 @@ func newCalcHandler(settings *Settings) func(w http.ResponseWriter, r *http.Requ
 		log.Println("Calculated expression:", exp, "result:", result)
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		if _, err := io.WriteString(w, result); err != nil {
-			if settings.LogLevel >= 1 {
+			if *settings.LogLevel >= 1 {
 				log.Println(err)
 			}
 		}

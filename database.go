@@ -11,7 +11,7 @@ import (
 // Function starts database connection. In golang sql.Open does not check if database is accessible
 // so db.Ping() is used to check this
 func initDB(settings Settings) (*sql.DB, error) {
-	db, err := sql.Open("mysql", fmt.Sprintf("%s:%s@/%s", settings.DBUsername, settings.DBPassword, settings.DBName))
+	db, err := sql.Open("mysql", fmt.Sprintf("%s:%s@/%s", *settings.DBUsername, *settings.DBPassword, *settings.DBName))
 	if err != nil {
 		return nil, err
 	}
@@ -33,6 +33,9 @@ func addUser(db *sql.DB, user UserCredentials) error {
 	}
 	if exists {
 		return ErrUserExists{"Error addUser: User already exists"}
+	}
+	if !isValidPasswd(user.Password) {
+		return ErrInvalidPassword{"Error addUser: Invalid password"}
 	}
 	userPasswdHash, err := bcrypt.GenerateFromPassword([]byte(user.Password), 12)
 	if err != nil {
@@ -98,7 +101,7 @@ func isBannedUser(db *sql.DB, username string) (bool, error) {
 	if err != nil {
 		return false, err
 	} else if !ok {
-		return false, ErrUserNotExists{message: "Error isCorrectPassword: User does not exist"}
+		return false, ErrUserNotExists{message: "Error isBannedUser: User does not exist"}
 	}
 	var isBanned int
 	row := db.QueryRow("SELECT is_banned FROM users WHERE username=?", username)
@@ -115,26 +118,148 @@ func isBannedUser(db *sql.DB, username string) (bool, error) {
 	return true, nil
 }
 
-func changeUsername(db *sql.DB, user UserCredentials, newUsername string) error {
+// Function checks if user is admin
+// Returns ErrUserNotExists if user does not exist
+// Function returns boolean value
+func isAdmin(db *sql.DB, username string) (bool, error) {
+	ok, err := isUserExists(db, username)
+	if err != nil {
+		return false, err
+	} else if !ok {
+		return false, ErrUserNotExists{message: "Error isAdmin: User does not exist"}
+	}
+	var isAdmin int
+	row := db.QueryRow("SELECT is_admin FROM users WHERE username=?", username)
+	err = row.Scan(&isAdmin)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, ErrUserNotExists{message: "Error isAdmin: User does not exist"}
+		}
+		return false, err
+	}
+	if isAdmin == 0 {
+		return false, nil
+	}
+	return true, nil
+}
+
+// Function changes username from oldUsername to newUsername
+// ErrUserNotExists returned if user with oldUserName does not exist
+// ErrUserExist returned if user with newUserName already exists
+func changeUsername(db *sql.DB, oldUsername, newUsername string) error { // TODO: use transactions
+	ok, err := isUserExists(db, oldUsername)
+	if err != nil {
+		return err
+	} else if !ok {
+		return ErrUserNotExists{message: "Error changeUsername: User does not exist"}
+	}
+
+	exists, err := isUserExists(db, newUsername)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return ErrUserExists{"Error changeUsername: Username taken"}
+	}
+
+	_, err = db.Exec("UPDATE users SET username=? WHERE username=?", newUsername, oldUsername)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
-func changeUserPasswd(db *sql.DB, user UserCredentials, newPasswd string) error {
+// Function changes user's password.
+// ErrInvalidPassword returned if password is invalid
+// ErrUserNotExists returned if user does not exist
+func changeUserPasswd(db *sql.DB, username string, newPasswd string) error {
+	ok, err := isUserExists(db, username)
+	if err != nil {
+		return err
+	} else if !ok {
+		return ErrUserNotExists{"Error: changeUserPasswd: User does not exist"}
+	}
+	if !isValidPasswd(newPasswd) {
+		return ErrInvalidPassword{"Error: changeUserPasswd: Invalid password"}
+	}
+
+	userPasswdHash, err := bcrypt.GenerateFromPassword([]byte(newPasswd), 12)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec("UPDATE users SET passwd_hash=? WHERE username=?", string(userPasswdHash), username)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
-func banUser(db *sql.DB, user UserCredentials) error {
+// Changes user's is_banned field to 1 regardless of its prior value
+// ErrUserNotExists returned if user does not exist
+func banUser(db *sql.DB, username string) error {
+	ok, err := isUserExists(db, username)
+	if err != nil {
+		return err
+	} else if !ok {
+		return ErrUserNotExists{"Error: banUser: User does not exist"}
+	}
+
+	_, err = db.Exec("UPDATE users SET is_banned=1 WHERE username=?", username)
 	return nil
 }
 
-func unbanUser(db *sql.DB, user UserCredentials) error {
+// Changes user's is_banned field to 0 regardless of its prior value
+// ErrUserNotExists returned if user does not exist
+func unbanUser(db *sql.DB, username string) error {
+	ok, err := isUserExists(db, username)
+	if err != nil {
+		return err
+	} else if !ok {
+		return ErrUserNotExists{"Error: unbanUser: User does not exist"}
+	}
+
+	_, err = db.Exec("UPDATE users SET is_banned=0 WHERE username=?", username)
 	return nil
 }
 
-func enableUserAdmin(db *sql.DB, user UserCredentials) error {
+// Changes user's is_admin field to 1 regardless of its prior value
+// ErrUserNotExists returned if user does not exist
+func enableUserAdmin(db *sql.DB, username string) error {
+	ok, err := isUserExists(db, username)
+	if err != nil {
+		return err
+	} else if !ok {
+		return ErrUserNotExists{"Error: enableUserAdmin: User does not exist"}
+	}
+
+	_, err = db.Exec("UPDATE users SET is_admin=1 WHERE username=?", username)
 	return nil
 }
 
-func disableUserAdmin(db *sql.DB, user UserCredentials) error {
+// Changes user's is_admin field to 0 regardless of its prior value
+// ErrUserNotExists returned if user does not exist
+func disableUserAdmin(db *sql.DB, username string) error {
+	ok, err := isUserExists(db, username)
+	if err != nil {
+		return err
+	} else if !ok {
+		return ErrUserNotExists{"Error: disableUserAdmin: User does not exist"}
+	}
+
+	_, err = db.Exec("UPDATE users SET is_admin=0 WHERE username=?", username)
 	return nil
+}
+
+func isValidUsername(username string) bool { // TODO: add regex to check character validity
+	if len(username) > 100 {
+		return false
+	}
+	return true
+}
+
+func isValidPasswd(password string) bool { // TODO: add password validity check
+	if len(password) < 4 || len(password) > 100 {
+		return false
+	}
+	return true
 }
