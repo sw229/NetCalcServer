@@ -12,7 +12,7 @@ import (
 // Function processes command line arguments to set values to respective Settings fields
 // Also returns the path to config file. If it is not given as an argument, default value is returned
 // Values passed as flags override those from the configuration file
-func processArgs() (Settings, string) { // REWRITE USING FLAG LIBRARY
+func processArgs() (Settings, string) {
 	settings := Settings{}
 	confPath := "~/.config/netcalcsrv.conf"
 
@@ -24,6 +24,14 @@ func processArgs() (Settings, string) { // REWRITE USING FLAG LIBRARY
 		}
 		if strings.HasPrefix(arg, "--config=") {
 			confPath, _ = strings.CutPrefix(arg, "--config=")
+		} else if strings.HasPrefix(arg, "--port=") {
+			portStr, _ := strings.CutPrefix(arg, "--port=")
+			port, err := strconv.Atoi(portStr)
+			if err != nil || port < 0 || port > 65535 {
+				fmt.Fprintln(os.Stderr, "ERROR: --port value is invalid")
+				os.Exit(2)
+			}
+			settings.ServerPort = &portStr
 		} else if strings.HasPrefix(arg, "--db-name=") {
 			dbName, _ := strings.CutPrefix(arg, "--db-name=")
 			settings.DBName = &dbName
@@ -36,12 +44,12 @@ func processArgs() (Settings, string) { // REWRITE USING FLAG LIBRARY
 		} else if strings.HasPrefix(arg, "--log-file-path=") {
 			logFilePath, _ := strings.CutPrefix(arg, "--log-file-path=")
 			settings.LogFilePath = &logFilePath
-			settings.LogToFile = boolPtr(true)
+			settings.LogToFile = Ptr(true)
 		} else if strings.HasPrefix(arg, "--log-level=") {
 			var err error
 			logLevelStr, _ := strings.CutPrefix(arg, "--log-level=")
 			logLevel, err := strconv.Atoi(logLevelStr)
-			if err != nil || logLevel > 3 || logLevel < 0 {
+			if err != nil || logLevel > 4 || logLevel < 0 {
 				fmt.Fprintln(os.Stderr, "Error: --log-level value is invalid")
 				os.Exit(2)
 			}
@@ -56,6 +64,7 @@ func processArgs() (Settings, string) { // REWRITE USING FLAG LIBRARY
 // Function reads config file
 // Path to config file passed as an argument
 // Config file settings:
+// port                        equivalent to Settings.ServerPort
 // enable_log_file=true/false  equivalent to Settings.LogToFile
 // log_file_path=FILE          equivalent to Settings.LogFilePath
 // log_level=NUM               equivalent to Settings.LogLevel. Integer values 0-3 are allowed
@@ -66,7 +75,7 @@ func readConfigFile(confPath string) (Settings, error) {
 	if strings.HasPrefix(confPath, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return Settings{}, ErrInvalidConfigFile{"Could not open config file. Unable to locate user home directory. Try using absolute path to config file"}
+			return Settings{}, ErrInvalidFile{"Could not open config file. Unable to locate user home directory. Try using absolute path to config file"}
 		}
 		confPath = home + "/" + confPath[2:]
 	}
@@ -79,7 +88,7 @@ func readConfigFile(confPath string) (Settings, error) {
 	for scanner.Scan() {
 		line := scanner.Text()
 		line = strings.Trim(line, " ")
-		if strings.HasPrefix(line, "#") {
+		if strings.HasPrefix(strings.Trim(line, " "), "#") {
 			continue
 		}
 
@@ -88,6 +97,12 @@ func readConfigFile(confPath string) (Settings, error) {
 			settingValue := strings.Trim(strings.SplitN(line, "=", 2)[1], " ")
 
 			switch settingName {
+			case "port":
+				port, err := strconv.Atoi(settingValue)
+				if err != nil || port < 0 || port > 65535 {
+					fmt.Fprintln(os.Stderr, "ERROR: Calue of port must be integer between 0 and 65535")
+				}
+				settings.ServerPort = &settingValue
 			case "enable_log_file":
 				if strings.ToLower(settingValue) == "true" {
 					settings.LogToFile = Ptr(true)
@@ -100,7 +115,7 @@ func readConfigFile(confPath string) (Settings, error) {
 				settings.LogFilePath = &settingValue
 			case "log_level":
 				logLevel, err := strconv.Atoi(settingValue)
-				if err != nil || logLevel > 3 || logLevel < 0 {
+				if err != nil || logLevel > 4 || logLevel < 0 {
 					fmt.Fprintln(os.Stderr, "ERROR: Value of log_level must be integer between 0 and 3")
 				} else {
 					settings.LogLevel = &logLevel
@@ -117,6 +132,7 @@ func readConfigFile(confPath string) (Settings, error) {
 	if err = scanner.Err(); err != nil {
 		return Settings{}, err
 	}
+
 	return settings, nil
 }
 
@@ -124,8 +140,11 @@ func readConfigFile(confPath string) (Settings, error) {
 // If at least one setting value is missing, program exits.
 // Values given as flags override those from config file
 // Function iterates through fields of argSettings, if any field is nil, it assigns a value
-// of corresponding field from confSettings. If neither of structs have the value assigned,
-// program exits
+// of corresponding field from confSettings.
+// If DBUsername or DBPassword are not given, function prompts user to type them.
+// If only database username is given, user is prompted for password.
+// If only password is given, user is prompted for both because this is stupid.
+// If any other setting is not given, os.Exit(2) is called.
 func genSettings() Settings {
 	argSettings, confPath := processArgs()
 	confSettings, err := readConfigFile(confPath)
@@ -142,7 +161,7 @@ func genSettings() Settings {
 		if field.Kind() == reflect.Ptr {
 			if field.IsNil() {
 				conffield := confSettingsValue.Field(i)
-				if !conffield.IsValid() || conffield.IsNil() {
+				if (!conffield.IsValid() || conffield.IsNil()) && !isPrompted(confSettingsValue.Type().Field(i)) {
 					fmt.Fprintf(os.Stderr, "ERROR: value of field %s not given\n", argSettingsValue.Type().Field(i).Name)
 					os.Exit(2)
 				} else {
@@ -151,12 +170,53 @@ func genSettings() Settings {
 			}
 		}
 	}
+	promptForDbCredentials(&argSettings.DBUsername, &argSettings.DBPassword)
 	return argSettings
+}
+
+// Checks if a struct field is database username or password
+func isPrompted(fieldValue reflect.StructField) bool {
+	// fields of Settings struct that user can be prompted for
+	dbUsernameFieldName := "DBUsername"
+	dbPaswordFieldName := "DBPassword"
+
+	fieldName := fieldValue.Name
+	if fieldName == dbUsernameFieldName || fieldName == dbPaswordFieldName {
+		return true
+	}
+	return false
+}
+
+// Function prompts user for database login credentials.
+// If database username is given, user is only prompted for password.
+// If only password is given, user is prompted for both username and password
+// Double pointer is used because Settings stores all values as pointers
+// So I am passing a pointer to pointer to modify the underlying pointer
+func promptForDbCredentials(dbUsername, dbPassword **string) {
+	var (
+		dbUsernameLocal string
+		dbPasswordLocal string
+	)
+
+	if *dbUsername == nil {
+		fmt.Println("Username for database connection:")
+		fmt.Scanln(&dbUsernameLocal)
+		*dbUsername = &dbUsernameLocal
+		fmt.Printf("Password for %s:\n", dbUsernameLocal)
+		fmt.Scanln(&dbPasswordLocal)
+		*dbPassword = &dbPasswordLocal
+	}
+	if *dbPassword == nil {
+		fmt.Printf("Password for %s:\n", **dbUsername)
+		fmt.Scanln(&dbPasswordLocal)
+		*dbPassword = &dbPasswordLocal
+	}
 }
 
 func printHelp() {
 	helpMsg := `Usage: netcalcsrv [OPTION]
 	--config=FILE          set config file. Default path is ~/.config/netcalcsrv.conf
+	--port=NUM             set port for the server to listen on. Integer values between 0 and 65535 are acepted
 	--db-name=NAME         set database name. Only mysql/mariadb supported
 	--db-username=USEENAME set username to connect to database
 	--db-password=PASSWORD set password to connect to database
@@ -166,6 +226,6 @@ func printHelp() {
 	fmt.Println(helpMsg)
 }
 
-func boolPtr(v bool) *bool {
+func Ptr[T any](v T) *T {
 	return &v
 }

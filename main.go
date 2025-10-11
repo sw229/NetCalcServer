@@ -5,13 +5,10 @@ import (
 	"log"
 	"net/http"
 	"os"
-
-	"github.com/Knetic/govaluate"
 )
 
 // TODO:
 // Add authentication and admin functionality
-// Add logging
 // Add ability to get database credentials from environment variables
 // Add ability to specify custom port for database
 // Rewrite processArgs to use flag package
@@ -21,36 +18,23 @@ import (
 
 func main() {
 	settings := genSettings()
+	lg, err := initLog(*settings.LogLevel, *settings.LogFilePath)
+	if err != nil {
+		log.Fatal(err)
+	}
 	db, err := initDB(settings)
 	if err != nil {
-		log.Fatal(err)
+		lg.logMsg(fmt.Sprintf("Failed to connect to database: %s", err), LogError)
+		os.Exit(1)
 	}
 
-	http.HandleFunc("/register", newRegisterHandler(&settings, db))
-	http.HandleFunc("/login", newLoginHandler(&settings, db))
-	http.HandleFunc("/calculate", newCalcHandler(&settings))
-	fmt.Println("Server running on port 8080")
-	err = http.ListenAndServe(":8080", nil)
+	http.HandleFunc("/register", newRegisterHandler(&settings, db, lg))
+	http.HandleFunc("/login", newLoginHandler(&settings, db, lg))
+	http.HandleFunc("/calculate", newCalcHandler(&settings, lg))
+	lg.logMsg(fmt.Sprintf("Server starting on port %s", *settings.ServerPort), LogInfo)
+	err = http.ListenAndServe(":"+*settings.ServerPort, nil)
 	if err != nil {
-		log.Fatal(err)
+		lg.logMsg(fmt.Sprintf("Could not start server: %s", err), LogError)
+		os.Exit(1)
 	}
-}
-
-func calcExpression(expression string) (string, error) {
-	govalExp, err := govaluate.NewEvaluableExpression(expression)
-	if err != nil {
-		return "", err
-	}
-	result, err := govalExp.Evaluate(nil)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR: calcExpression:", err)
-	}
-	if fmt.Sprint(result) == "<nil>" {
-		return "", nil
-	}
-	return fmt.Sprint(result), nil
-}
-
-func Ptr[T any](v T) *T {
-	return &v
 }

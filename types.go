@@ -2,9 +2,11 @@ package main
 
 // LogLevel 0 - logs nothing
 // Loglevel 1 - logs errors
-// LogLevel 2 - logs user login, register, errors
-// LogLevel 3 - logs user login, register, errors, all operations
+// Loglevel 2 - logs errors, warnings
+// LogLevel 3 - logs user info (login, register), errors, warnings
+// LogLevel 4 - logs info, errors, warnings, all operations
 type Settings struct {
+	ServerPort  *string
 	LogLevel    *int
 	LogToFile   *bool
 	LogFilePath *string
@@ -45,11 +47,11 @@ func (err ErrInvalidPassword) Error() string {
 	return err.message
 }
 
-// Returned if config file is invalid
-type ErrInvalidConfigFile struct {
+// Returned if file is invalid
+type ErrInvalidFile struct {
 	message string
 }
 
-func (err ErrInvalidConfigFile) Error() string {
+func (err ErrInvalidFile) Error() string {
 	return err.message
 }
