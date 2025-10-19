@@ -1,5 +1,7 @@
 package main
 
+import "time"
+
 // LogLevel 0 - logs nothing
 // Loglevel 1 - logs errors
 // Loglevel 2 - logs errors, warnings
@@ -15,13 +17,23 @@ type Settings struct {
 	DBPassword  *string
 }
 
+// Structure to store user credentials before an entry
+// for the user is created in the database
 type UserCredentials struct {
 	Username string
 	Password string
 	IsAdmin  bool
 }
 
-// Returned if user with specific username already exists
+// Structure for user data sent to admin client
+type DisplayedUserData struct {
+	Username    string
+	DateCreated time.Time
+	IsAdmin     bool
+	IsBanned    bool
+}
+
+// Returned if requested user does not exist
 type ErrUserNotExists struct {
 	message string
 }
@@ -30,7 +42,7 @@ func (err ErrUserNotExists) Error() string {
 	return err.message
 }
 
-// Returned if user with specific username does not exist
+// Returned if user with specific username already exists
 type ErrUserExists struct {
 	message string
 }
@@ -39,11 +51,12 @@ func (err ErrUserExists) Error() string {
 	return err.message
 }
 
-type ErrInvalidPassword struct {
+// Returned if username or password are invalid
+type ErrInvalidNameOrPasswd struct {
 	message string
 }
 
-func (err ErrInvalidPassword) Error() string {
+func (err ErrInvalidNameOrPasswd) Error() string {
 	return err.message
 }
 

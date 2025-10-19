@@ -31,6 +31,7 @@ func main() {
 	http.HandleFunc("/register", newRegisterHandler(&settings, db, lg))
 	http.HandleFunc("/login", newLoginHandler(&settings, db, lg))
 	http.HandleFunc("/calculate", newCalcHandler(&settings, lg))
+	http.HandleFunc("/admin/getusers", newGetUsersHandler(db, lg))
 	lg.logMsg(fmt.Sprintf("Server starting on port %s", *settings.ServerPort), LogInfo)
 	err = http.ListenAndServe(":"+*settings.ServerPort, nil)
 	if err != nil {

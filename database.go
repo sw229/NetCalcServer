@@ -3,6 +3,8 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"strings"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	"golang.org/x/crypto/bcrypt"
@@ -22,6 +24,69 @@ func initDB(settings Settings) (*sql.DB, error) {
 	return db, nil
 }
 
+// Function returns a list of ALL users
+func listAllUsers(db *sql.DB) ([]DisplayedUserData, error) {
+	rows, err := db.Query("SELECT username, date_created, is_admin, is_banned FROM users")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var users []DisplayedUserData
+
+	for rows.Next() {
+		var user DisplayedUserData
+		var dateCreatedStr string
+		err := rows.Scan(&user.Username, &dateCreatedStr, &user.IsAdmin, &user.IsBanned)
+		if err != nil {
+			return nil, err
+		}
+		if user.DateCreated, err = time.Parse("2006-01-02 15:04:05", dateCreatedStr); err != nil {
+			return nil, fmt.Errorf("failed to parse date_created: '%s': %w", dateCreatedStr, err)
+		}
+		users = append(users, user)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	return users, nil
+}
+
+// Function returns a list of users with specified usernames
+// If a user is not present in the database, it is ignored
+func listUsers(db *sql.DB, usernames []string) ([]DisplayedUserData, error) {
+	users := []DisplayedUserData{}
+	placeholders := make([]string, len(usernames))
+	queryArgs := make([]interface{}, len(usernames))
+	for i, name := range usernames {
+		placeholders[i] = "?"
+		queryArgs[i] = name
+	}
+	placeholderStr := strings.Join(placeholders, ",")
+	rows, err := db.Query(fmt.Sprintf("SELECT username, date_created, is_admin, is_banned FROM users WHERE username IN (%s)", placeholderStr), queryArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var user DisplayedUserData
+		var dateCreatedStr string
+		err = rows.Scan(&user.Username, &dateCreatedStr, &user.IsAdmin, &user.IsBanned)
+		if err != nil {
+			return nil, err
+		}
+		if user.DateCreated, err = time.Parse("2006-01-02 15:04:05", dateCreatedStr); err != nil {
+			return nil, fmt.Errorf("failed to parse date_created: '%s': %w", dateCreatedStr, err)
+		}
+		users = append(users, user)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	return users, nil
+}
+
 // Function adds user to database.
 // Returns ErrUserExists if user exists
 // Adds user with given username, password and admin status to "users" table
@@ -34,8 +99,11 @@ func addUser(db *sql.DB, user UserCredentials) error {
 	if exists {
 		return ErrUserExists{"Error addUser: User already exists"}
 	}
+	if !isValidUsername(user.Username) {
+		return ErrInvalidNameOrPasswd{"Error addUser: Invalid username"}
+	}
 	if !isValidPasswd(user.Password) {
-		return ErrInvalidPassword{"Error addUser: Invalid password"}
+		return ErrInvalidNameOrPasswd{"Error addUser: Invalid password"}
 	}
 	userPasswdHash, err := bcrypt.GenerateFromPassword([]byte(user.Password), 12)
 	if err != nil {
@@ -180,7 +248,7 @@ func changeUserPasswd(db *sql.DB, username string, newPasswd string) error {
 		return ErrUserNotExists{"Error: changeUserPasswd: User does not exist"}
 	}
 	if !isValidPasswd(newPasswd) {
-		return ErrInvalidPassword{"Error: changeUserPasswd: Invalid password"}
+		return ErrInvalidNameOrPasswd{"Error: changeUserPasswd: Invalid password"}
 	}
 
 	userPasswdHash, err := bcrypt.GenerateFromPassword([]byte(newPasswd), 12)
@@ -250,15 +318,14 @@ func disableUserAdmin(db *sql.DB, username string) error {
 	return nil
 }
 
-func isValidUsername(username string) bool { // TODO: add regex to check character validity
-	if len(username) > 100 {
+func isValidPasswd(password string) bool { // TODO: add password validity check
+	if len(password) < 4 || len(password) > 100 {
 		return false
 	}
 	return true
 }
-
-func isValidPasswd(password string) bool { // TODO: add password validity check
-	if len(password) < 4 || len(password) > 100 {
+func isValidUsername(username string) bool { // TODO: add regex to check character validity
+	if len(username) < 2 || len(username) > 100 {
 		return false
 	}
 	return true
