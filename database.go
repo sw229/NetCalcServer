@@ -63,7 +63,13 @@ func listUsers(db *sql.DB, usernames []string) ([]DisplayedUserData, error) {
 		queryArgs[i] = name
 	}
 	placeholderStr := strings.Join(placeholders, ",")
-	rows, err := db.Query(fmt.Sprintf("SELECT username, date_created, is_admin, is_banned FROM users WHERE username IN (%s)", placeholderStr), queryArgs...)
+	rows, err := db.Query(
+		fmt.Sprintf(
+			"SELECT username, date_created, is_admin, is_banned FROM users WHERE username IN (%s)",
+			placeholderStr,
+		),
+		queryArgs...,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -110,6 +116,22 @@ func addUser(db *sql.DB, user UserCredentials) error {
 		return err
 	}
 	_, err = db.Exec("INSERT INTO users (username, passwd_hash, date_created, is_admin, is_banned) VALUES(?, ?, NOW(), ?, 0)", user.Username, string(userPasswdHash), user.IsAdmin)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// Function deletes specified user
+func deleteUser(db *sql.DB, username string) error {
+	exists, err := isUserExists(db, username)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return ErrUserNotExists{"Error deleteUser: User does not exist"}
+	}
+	_, err = db.Exec("DELETE FROM users WHERE username = ?", username)
 	if err != nil {
 		return err
 	}
@@ -163,7 +185,6 @@ func isCorrectPassword(db *sql.DB, user UserCredentials) (bool, error) {
 
 // Function checks if user is banned
 // Returns ErrUserNotExists if user does not exist
-// Function returns boolean value
 func isBannedUser(db *sql.DB, username string) (bool, error) {
 	ok, err := isUserExists(db, username)
 	if err != nil {
@@ -273,6 +294,9 @@ func banUser(db *sql.DB, username string) error {
 	}
 
 	_, err = db.Exec("UPDATE users SET is_banned=1 WHERE username=?", username)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -287,6 +311,9 @@ func unbanUser(db *sql.DB, username string) error {
 	}
 
 	_, err = db.Exec("UPDATE users SET is_banned=0 WHERE username=?", username)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -301,6 +328,9 @@ func enableUserAdmin(db *sql.DB, username string) error {
 	}
 
 	_, err = db.Exec("UPDATE users SET is_admin=1 WHERE username=?", username)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -315,6 +345,9 @@ func disableUserAdmin(db *sql.DB, username string) error {
 	}
 
 	_, err = db.Exec("UPDATE users SET is_admin=0 WHERE username=?", username)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 

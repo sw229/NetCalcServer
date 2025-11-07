@@ -13,7 +13,39 @@ import (
 	"github.com/Knetic/govaluate"
 )
 
-func newLoginHandler(settings *Settings, db *sql.DB, lg Logging) func(w http.ResponseWriter, r *http.Request) {
+// Function handles health check requests
+// Returns a map with 2 keys: db - database accessibility, server - server status (now it is always ok)
+// Possible values: ok, error
+func newPingHandler(db *sql.DB, lg Logging) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			lg.logMsg("non-GET request to /ping", LogInfo)
+			http.Error(w, "Bad request", http.StatusMethodNotAllowed)
+			return
+		}
+		defer r.Body.Close()
+
+		checks := make(map[string]string)
+
+		err := db.Ping()
+		if err != nil {
+			checks["db"] = "error"
+		} else {
+			checks["db"] = "ok"
+		}
+		checks["server"] = "ok"
+		lg.logMsg("Ping request recieved", LogInfo)
+		if checks["db"] == "error" {
+			lg.logMsg(fmt.Sprintf("Error accessing database: %s", err), LogError)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(checks)
+	}
+}
+
+// Function handles login requests, generates jwt tokens
+// Token validation is not implemented, so this is useless
+func newLoginHandler(db *sql.DB, lg Logging) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Check if login request method is correct
 		if r.Method != http.MethodPost {
@@ -43,7 +75,7 @@ func newLoginHandler(settings *Settings, db *sql.DB, lg Logging) func(w http.Res
 				return
 			}
 			if err != nil {
-				lg.logMsg(fmt.Sprintf("Error reading database: %s", err), LogInfo)
+				lg.logMsg(fmt.Sprintf("Error reading database: %s", err), LogError)
 				http.Error(w, "Internal server error", http.StatusInternalServerError)
 				return
 			}
@@ -69,7 +101,7 @@ func newLoginHandler(settings *Settings, db *sql.DB, lg Logging) func(w http.Res
 
 // Function adds new user to the database
 // User data is stored in POST request body in json-encoded UserCredentials struct
-func newRegisterHandler(settings *Settings, db *sql.DB, lg Logging) func(w http.ResponseWriter, r *http.Request) {
+func newRegisterHandler(db *sql.DB, lg Logging) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			lg.logMsg("non-POST request to /register", LogInfo)
@@ -91,6 +123,10 @@ func newRegisterHandler(settings *Settings, db *sql.DB, lg Logging) func(w http.
 				lg.logMsg(fmt.Sprintf("Attempted to add existing user %s", user.Username), LogInfo)
 				http.Error(w, "User already exists", http.StatusBadRequest)
 				return
+			} else if _, ok := err.(ErrInvalidNameOrPasswd); ok {
+				lg.logMsg(fmt.Sprintf("Attempted to add existing user %s", user.Username), LogInfo)
+				http.Error(w, "Invalid username or password", http.StatusBadRequest)
+				return
 			}
 			lg.logMsg(fmt.Sprintf("Error adding user to database: %s", err), LogError)
 			http.Error(w, "Internal error", http.StatusInternalServerError)
@@ -98,12 +134,127 @@ func newRegisterHandler(settings *Settings, db *sql.DB, lg Logging) func(w http.
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		if _, err := io.WriteString(w, "success"); err != nil {
-			lg.logMsg(fmt.Sprintf("User register request failed: %s", err), LogInfo)
+			lg.logMsg(fmt.Sprintf("Unable to send response: %s", err), LogInfo)
 		}
 	}
 }
 
-func newCalcHandler(settings *Settings, lg Logging) func(w http.ResponseWriter, r *http.Request) {
+// Handles user deletion request
+func newDeleteHandler(db *sql.DB, lg Logging) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			lg.logMsg("non-DELETE request to /delete", LogInfo)
+			http.Error(w, "Bad request", http.StatusMethodNotAllowed)
+		}
+
+		usernameBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			lg.logMsg("Could not decode request body", LogInfo)
+			http.Error(w, fmt.Sprintf("Invalid request body: %s", err), http.StatusBadRequest)
+			return
+		}
+		username := string(usernameBytes)
+
+		err = deleteUser(db, username)
+		if _, ok := err.(ErrUserNotExists); ok {
+			if _, err := io.WriteString(w, "User does not exist"); err != nil {
+				lg.logMsg(fmt.Sprintf("User deletion request failed: %s", err), LogInfo)
+				return
+			}
+			return
+		} else if err != nil {
+			lg.logMsg(fmt.Sprintf("Error deleting user: %s", err), LogError)
+			http.Error(w, "Internal error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		if _, err := io.WriteString(w, "success"); err != nil {
+			lg.logMsg(fmt.Sprintf("Unable to send response: %s", err), LogInfo)
+		}
+	}
+}
+
+// Handles a POST request containing userToBan struct (2 fields - username and ban)
+func newBanHandler(db *sql.DB, lg Logging) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			lg.logMsg("non-POST request to /admin/ban", LogInfo)
+			http.Error(w, "Bad request", http.StatusMethodNotAllowed)
+		}
+
+		// Deserialize userToBan struct
+		var user UserToBan
+		if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
+			lg.logMsg("Could not decode request body", LogInfo)
+			http.Error(w, fmt.Sprintf("Invalid request body: %s", err), http.StatusBadRequest)
+			return
+		}
+
+		// Check if user is banned/unbanned already
+		banned, err := isBannedUser(db, user.Psername)
+		if err != nil {
+			if _, ok := err.(ErrUserNotExists); ok {
+				if user.Ban {
+					lg.logMsg("Attempted to ban non-existing user", LogInfo)
+				} else {
+					lg.logMsg("Attempted to unban non-existing user", LogInfo)
+				}
+				if _, err := io.WriteString(w, "User does not exist"); err != nil {
+					lg.logMsg(fmt.Sprintf("User ban request failed: %s", err), LogInfo)
+					return
+				}
+				return
+			}
+			if user.Ban {
+				lg.logMsg(fmt.Sprintf("Error banning user: %s", err), LogError)
+			} else {
+				lg.logMsg(fmt.Sprintf("Error unbanning user: %s", err), LogError)
+			}
+
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		if user.Ban == banned {
+			if _, err := io.WriteString(w, "Nothing changed"); err != nil {
+				lg.logMsg(fmt.Sprintf("User ban request failed: %s", err), LogInfo)
+				return
+			}
+			if banned {
+				lg.logMsg(fmt.Sprintf("Attempted to ban a banned user: %s", user.Psername), LogInfo)
+			} else {
+				lg.logMsg(fmt.Sprintf("Attempted to unban a non-banned user: %s", user.Psername), LogInfo)
+			}
+			return
+		}
+		// ADD user ban/unban logic. At this point in function user is valid and ban/unban operation is necessary
+		if user.Ban {
+			if err := banUser(db, user.Psername); err != nil {
+				lg.logMsg(fmt.Sprintf("Error unbanning user: %s", err), LogError)
+				http.Error(w, "Internal server error", http.StatusInternalServerError)
+				return
+			}
+			lg.logMsg(fmt.Sprintf("User %s banned", user.Psername), LogInfo)
+			if _, err := io.WriteString(w, fmt.Sprintf("User %s banned", user.Psername)); err != nil {
+				lg.logMsg(fmt.Sprintf("Could not send response to client: %s", err), LogInfo)
+			}
+			return
+		}
+		if err := unbanUser(db, user.Psername); err != nil {
+			lg.logMsg(fmt.Sprintf("Error unbanning user: %s", err), LogError)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		lg.logMsg(fmt.Sprintf("User %s unbanned", user.Psername), LogInfo)
+		if _, err := io.WriteString(w, fmt.Sprintf("User %s unbanned", user.Psername)); err != nil {
+			lg.logMsg(fmt.Sprintf("Could not send response to client: %s", err), LogInfo)
+		}
+	}
+}
+
+// Handles calculation requests
+// Expression is sent in plain text
+// Result is also sent in plain text
+func newCalcHandler(db *sql.DB, lg Logging) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			lg.logMsg("Incoming calculation request failed: bad request", LogInfo)

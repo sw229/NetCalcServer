@@ -27,10 +27,18 @@ type UserCredentials struct {
 
 // Structure for user data sent to admin client
 type DisplayedUserData struct {
-	Username    string
-	DateCreated time.Time
-	IsAdmin     bool
-	IsBanned    bool
+	Username    string    `json:"username"`
+	DateCreated time.Time `json:"created"`
+	IsAdmin     bool      `json:"admin"`
+	IsBanned    bool      `json:"banned"`
+}
+
+// Struct to change user ban status
+// If ban == true, user is banned
+// Else user is unbanned
+type UserToBan struct {
+	Psername string `json:"username"`
+	Ban      bool   `json:"ban"`
 }
 
 // Returned if requested user does not exist
