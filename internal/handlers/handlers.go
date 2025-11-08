@@ -179,13 +179,14 @@ func NewDeleteHandler(db *sql.DB, lg logging.Logging) func(w http.ResponseWriter
 	}
 }
 
-// Handles a POST request containing userToBan struct (2 fields - username and ban)
+// Handles a POST request containing userToBan struct (2 fields - username and new ban status)
 func NewBanHandler(db *sql.DB, lg logging.Logging) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// if request is not POST, client recieves an error
 		if r.Method != http.MethodPost {
 			lg.LogMsg("non-POST request to /admin/ban", logging.LogInfo)
 			http.Error(w, "Bad request", http.StatusMethodNotAllowed)
+			return
 		}
 
 		// Deserialize userToBan struct
@@ -196,48 +197,26 @@ func NewBanHandler(db *sql.DB, lg logging.Logging) func(w http.ResponseWriter, r
 			return
 		}
 
-		// Check if user is banned/unbanned already
-		banned, err := database.IsBannedUser(db, user.Username)
-		if err != nil {
-			if _, ok := err.(types.ErrUserNotExists); ok {
-				if user.NewBanStatus {
-					lg.LogMsg("Attempted to ban non-existing user", logging.LogInfo)
-				} else {
-					lg.LogMsg("Attempted to unban non-existing user", logging.LogInfo)
-				}
-				if _, err := io.WriteString(w, "User does not exist"); err != nil {
-					lg.LogMsg(fmt.Sprintf("User ban request failed: %s", err), logging.LogInfo)
-					return
-				}
-				return
-			}
-			if user.NewBanStatus {
-				lg.LogMsg(fmt.Sprintf("Error banning user: %s", err), logging.LogError)
-			} else {
-				lg.LogMsg(fmt.Sprintf("Error unbanning user: %s", err), logging.LogError)
-			}
-
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
-			return
-		}
-
-		// Check if user is already banned/unbanned
-		if user.NewBanStatus == banned {
-			if _, err := io.WriteString(w, "Nothing changed"); err != nil {
-				lg.LogMsg(fmt.Sprintf("Could not send response ti client: %s", err), logging.LogInfo)
-				return
-			}
-			if banned {
-				lg.LogMsg(fmt.Sprintf("Attempted to ban a banned user: %s", user.Username), logging.LogInfo)
-			} else {
-				lg.LogMsg(fmt.Sprintf("Attempted to unban a non-banned user: %s", user.Username), logging.LogInfo)
-			}
-			return
-		}
 		// Ban user
+		// database.BanUser also checks if user exists or is already banned
 		if user.NewBanStatus {
 			if err := database.BanUser(db, user.Username); err != nil {
-				lg.LogMsg(fmt.Sprintf("Error unbanning user: %s", err), logging.LogError)
+				if _, ok := err.(types.ErrUserNotExists); ok {
+					lg.LogMsg("Attempted to ban a non-existing user", logging.LogInfo)
+					if _, err := io.WriteString(w, "User does not exist"); err != nil {
+						lg.LogMsg(fmt.Sprintf("Unable to send response to client: %s", err), logging.LogInfo)
+						return
+					}
+					return
+				} else if _, ok := err.(types.ErrUserStatusUnchanged); ok {
+					lg.LogMsg("Attempted to ban a banned user", logging.LogInfo)
+					if _, err := io.WriteString(w, "Nothing changed"); err != nil {
+						lg.LogMsg(fmt.Sprintf("Unable to send response to client: %s", err), logging.LogInfo)
+						return
+					}
+					return
+				}
+				lg.LogMsg(fmt.Sprintf("Error banning user: %s", err), logging.LogError)
 				http.Error(w, "Internal server error", http.StatusInternalServerError)
 				return
 			}
@@ -248,7 +227,23 @@ func NewBanHandler(db *sql.DB, lg logging.Logging) func(w http.ResponseWriter, r
 			return
 		}
 		// Unban user
+		// database.UnbanUser also checks if user exists or is not banned
 		if err := database.UnbanUser(db, user.Username); err != nil {
+			if _, ok := err.(types.ErrUserNotExists); ok {
+				lg.LogMsg("Attempted to unban a non-existing user", logging.LogInfo)
+				if _, err := io.WriteString(w, "User does not exist"); err != nil {
+					lg.LogMsg(fmt.Sprintf("Unable to send response to client: %s", err), logging.LogInfo)
+					return
+				}
+				return
+			} else if _, ok := err.(types.ErrUserStatusUnchanged); ok {
+				lg.LogMsg("Attempted to unban a non-banned user", logging.LogInfo)
+				if _, err := io.WriteString(w, "Nothing changed"); err != nil {
+					lg.LogMsg(fmt.Sprintf("Unable to send response to client: %s", err), logging.LogInfo)
+					return
+				}
+				return
+			}
 			lg.LogMsg(fmt.Sprintf("Error unbanning user: %s", err), logging.LogError)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
@@ -260,6 +255,7 @@ func NewBanHandler(db *sql.DB, lg logging.Logging) func(w http.ResponseWriter, r
 	}
 }
 
+// FINISH THIS
 // Handles a POST request containing changeAdminStatus struct (2 fields - username and new status)
 func NewSetAdminHandler(db *sql.DB, lg logging.Logging) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {

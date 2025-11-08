@@ -57,7 +57,8 @@ func processArgs() (types.Settings, string) {
 			}
 			settings.LogLevel = &logLevel
 		} else {
-			fmt.Fprintf(os.Stderr, "ERROR: Invalid option %s\nUse --help for help", arg)
+			fmt.Fprintf(os.Stderr, "ERROR: Invalid option %s\nUse --help for help\n", arg)
+			os.Exit(2)
 		}
 	}
 	return settings, confPath

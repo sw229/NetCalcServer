@@ -76,6 +76,15 @@ func (err ErrInvalidNameOrPasswd) Error() string {
 	return err.Message
 }
 
+// Returned when attempting to ban a banned user, set admin rights for an admin, etc.
+type ErrUserStatusUnchanged struct {
+	Message string
+}
+
+func (err ErrUserStatusUnchanged) Error() string {
+	return err.Message
+}
+
 // Returned if file is invalid
 type ErrInvalidFile struct {
 	Message string
