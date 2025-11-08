@@ -11,61 +11,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-type IDbConnection interface {
-	// Function returns a list of ALL users
-	ListAllUsers() ([]types.DisplayedUserData, error)
-
-	// Function returns a list of users with specified usernames. A user absent from the database is ignored
-	ListUsers([]string) ([]types.DisplayedUserData, error)
-
-	// Function adds user to database. Returns ErrUserExists if user exists
-	AddUser(types.UserCredentials) error
-
-	// Function deletes specified user. Returns ErrUserNotExists if user does not exist
-	DeleteUser(string) error
-
-	// Function checks if password is correct. Returns ErrUserNotExists if user does not exist
-	IsCorrectPassword(types.UserCredentials) (bool, error)
-
-	// Fucntion checks if user is banned. Returns ErrUserNotExists if user does not exist
-	IsBannedUser(username string) (bool, error)
-
-	// Fucntion checks if user is admin. Returns ErrUserNotExists if user does not exist
-	IsAdmin(username string) (bool, error)
-
-	// Function changes username of a user whose name is passed as the first operand
-	// to value passed as the second operand.
-	// ErrUserNotExists returned if user with oldUserName does not exist
-	// ErrUserExist returned if user with newUserName already exists
-	ChangeUsername(string, string) error
-
-	// Function changes password of a user whose username is passed as the first argument
-	// to value passed as the second argument.
-	// ErrUserNotExists returned if user does not exist
-	// ErrInvalidPassword returned if password is invalid
-	ChangeUserPasswd(string, string) error
-
-	// Function bans a user
-	// ErrUserNotExists returned if user does not exist
-	// ErrUserStatusUnchanged returned if user already banned
-	BanUser(string) error
-
-	// Function unbans a user
-	// ErrUserNotExists returned if user does not exist
-	// ErrUserStatusUnchanged returned if user is not banned
-	UnbanUser(string) error
-
-	// Function enables admin rights for a user
-	// ErrUserNotExists returned if user does not exist
-	// ErrUserStatusUnchanged returned if user is already admin
-	EnableUserAdmin(string) error
-
-	// Function disables admin rights for a user
-	// ErrUserNotExists returned if user does not exist
-	// ErrUserStatusUnchanged returned if user is not an admin
-	DisableUserAdmin(string) error
-}
-
 type MysqlConnection struct {
 }
 
