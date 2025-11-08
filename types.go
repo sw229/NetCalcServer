@@ -34,11 +34,19 @@ type DisplayedUserData struct {
 }
 
 // Struct to change user ban status
-// If ban == true, user is banned
+// If newBanStatus == true, user is banned
 // Else user is unbanned
 type UserToBan struct {
-	Psername string `json:"username"`
-	Ban      bool   `json:"ban"`
+	Username     string `json:"username"`
+	NewBanStatus bool   `json:"ban"`
+}
+
+// Struct to change user admin status
+// If NewAdminStatus == true, user becomes admin
+// Else admin status is disabled
+type ChangeAdminStatus struct {
+	Username       string `json:"username"`
+	NewAdminStatus bool   `json:"admin"`
 }
 
 // Returned if requested user does not exist

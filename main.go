@@ -8,6 +8,8 @@ import (
 )
 
 // TODO:
+// Add enable/disable admin handlers
+// Use encoding/json/v2
 // Add success/failure messages for all requests
 // Add authentication and admin functionality
 // Add ability to get database credentials from environment variables
@@ -35,6 +37,7 @@ func main() {
 	http.HandleFunc("/calculate", newCalcHandler(db, lg))
 	http.HandleFunc("/admin/getusers", newGetUsersHandler(db, lg))
 	http.HandleFunc("/admin/ban", newBanHandler(db, lg))
+	http.HandleFunc("admin/adminstatus", newSetAdminHandler(db, lg))
 	lg.logMsg(fmt.Sprintf("Server starting on port %s", *settings.ServerPort), LogInfo)
 	err = http.ListenAndServe(":"+*settings.ServerPort, nil)
 	if err != nil {
