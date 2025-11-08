@@ -1,4 +1,4 @@
-package main
+package handlers
 
 import (
 	"database/sql"
@@ -10,16 +10,21 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/sw229/netCalcServer/internal/auth"
+	"github.com/sw229/netCalcServer/internal/database"
+	"github.com/sw229/netCalcServer/internal/logging"
+	"github.com/sw229/netCalcServer/internal/types"
+
 	"github.com/Knetic/govaluate"
 )
 
 // Function handles health check requests
 // Returns a map with 2 keys: db - database accessibility, server - server status (now it is always ok)
 // Possible values: ok, error
-func newPingHandler(db *sql.DB, lg Logging) func(w http.ResponseWriter, r *http.Request) {
+func NewPingHandler(db *sql.DB, lg logging.Logging) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			lg.logMsg("non-GET request to /ping", LogInfo)
+			lg.LogMsg("non-GET request to /ping", logging.LogInfo)
 			http.Error(w, "Bad request", http.StatusMethodNotAllowed)
 			return
 		}
@@ -34,9 +39,9 @@ func newPingHandler(db *sql.DB, lg Logging) func(w http.ResponseWriter, r *http.
 			checks["db"] = "ok"
 		}
 		checks["server"] = "ok"
-		lg.logMsg("Ping request recieved", LogInfo)
+		lg.LogMsg("Ping request recieved", logging.LogInfo)
 		if checks["db"] == "error" {
-			lg.logMsg(fmt.Sprintf("Error accessing database: %s", err), LogError)
+			lg.LogMsg(fmt.Sprintf("Error accessing database: %s", err), logging.LogError)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(checks)
@@ -45,21 +50,21 @@ func newPingHandler(db *sql.DB, lg Logging) func(w http.ResponseWriter, r *http.
 
 // Function handles login requests, generates jwt tokens
 // Token validation is not implemented, so this is useless
-func newLoginHandler(db *sql.DB, lg Logging) func(w http.ResponseWriter, r *http.Request) {
+func NewLoginHandler(db *sql.DB, lg logging.Logging) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Check if login request method is correct
 		if r.Method != http.MethodPost {
-			lg.logMsg("non-POST request to /login", LogInfo)
+			lg.LogMsg("non-POST request to /login", logging.LogInfo)
 			http.Error(w, "Bad request", http.StatusMethodNotAllowed)
 			return
 		}
 		defer r.Body.Close()
 
 		// Decode body into UserCredentials struct. Maybe use Authorization handler instead?
-		var user UserCredentials
+		var user types.UserCredentials
 		err := json.NewDecoder(r.Body).Decode(&user)
 		if err != nil {
-			lg.logMsg("Could not decode request body", LogInfo)
+			lg.LogMsg("Could not decode request body", logging.LogInfo)
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
@@ -68,23 +73,23 @@ func newLoginHandler(db *sql.DB, lg Logging) func(w http.ResponseWriter, r *http
 		// isCorrectPassword returns ErrUserNotExists if username is invalid
 		// or false with nil error if password is invalid
 		// Any other error is an issue while accessing database
-		if ok, err := isCorrectPassword(db, user); !ok {
-			if _, ok := err.(ErrUserNotExists); ok {
-				lg.logMsg(fmt.Sprintf("Attempted login with invalid username: %s", user.Username), LogInfo)
+		if ok, err := database.IsCorrectPassword(db, user); !ok {
+			if _, ok := err.(types.ErrUserNotExists); ok {
+				lg.LogMsg(fmt.Sprintf("Attempted login with invalid username: %s", user.Username), logging.LogInfo)
 				http.Error(w, "Invalid username", http.StatusUnauthorized)
 				return
 			}
 			if err != nil {
-				lg.logMsg(fmt.Sprintf("Error reading database: %s", err), LogError)
+				lg.LogMsg(fmt.Sprintf("Error reading database: %s", err), logging.LogError)
 				http.Error(w, "Internal server error", http.StatusInternalServerError)
 				return
 			}
 		}
 
 		// Token is generated from user credentials and secret
-		token, err := genJwt(user, secret)
+		token, err := auth.GenJwt(user, auth.Secret)
 		if err != nil {
-			lg.logMsg("Error while generating jwt token", LogError)
+			lg.LogMsg("Error while generating jwt token", logging.LogError)
 			http.Error(w, "Error generating token", http.StatusInternalServerError)
 			return
 		}
@@ -101,115 +106,115 @@ func newLoginHandler(db *sql.DB, lg Logging) func(w http.ResponseWriter, r *http
 
 // Function adds new user to the database
 // User data is stored in POST request body in json-encoded UserCredentials struct
-func newRegisterHandler(db *sql.DB, lg Logging) func(w http.ResponseWriter, r *http.Request) {
+func NewRegisterHandler(db *sql.DB, lg logging.Logging) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			lg.logMsg("non-POST request to /register", LogInfo)
+			lg.LogMsg("non-POST request to /register", logging.LogInfo)
 			http.Error(w, "Bad request", http.StatusMethodNotAllowed)
 			return
 		}
 		defer r.Body.Close()
 
-		var user UserCredentials
+		var user types.UserCredentials
 
 		if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
-			lg.logMsg("Could not decode request body", LogInfo)
+			lg.LogMsg("Could not decode request body", logging.LogInfo)
 			http.Error(w, fmt.Sprintf("Invalid request body: %s", err), http.StatusBadRequest)
 			return
 		}
 
-		if err := addUser(db, user); err != nil {
-			if _, ok := err.(ErrUserExists); ok {
-				lg.logMsg(fmt.Sprintf("Attempted to add existing user %s", user.Username), LogInfo)
+		if err := database.AddUser(db, user); err != nil {
+			if _, ok := err.(types.ErrUserExists); ok {
+				lg.LogMsg(fmt.Sprintf("Attempted to add existing user %s", user.Username), logging.LogInfo)
 				http.Error(w, "User already exists", http.StatusBadRequest)
 				return
-			} else if _, ok := err.(ErrInvalidNameOrPasswd); ok {
-				lg.logMsg(fmt.Sprintf("Attempted to add existing user %s", user.Username), LogInfo)
+			} else if _, ok := err.(types.ErrInvalidNameOrPasswd); ok {
+				lg.LogMsg(fmt.Sprintf("Attempted to add existing user %s", user.Username), logging.LogInfo)
 				http.Error(w, "Invalid username or password", http.StatusBadRequest)
 				return
 			}
-			lg.logMsg(fmt.Sprintf("Error adding user to database: %s", err), LogError)
+			lg.LogMsg(fmt.Sprintf("Error adding user to database: %s", err), logging.LogError)
 			http.Error(w, "Internal error", http.StatusInternalServerError)
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		if _, err := io.WriteString(w, "success"); err != nil {
-			lg.logMsg(fmt.Sprintf("Unable to send response: %s", err), LogInfo)
+			lg.LogMsg(fmt.Sprintf("Unable to send response: %s", err), logging.LogInfo)
 		}
 	}
 }
 
 // Handles user deletion request
-func newDeleteHandler(db *sql.DB, lg Logging) func(w http.ResponseWriter, r *http.Request) {
+func NewDeleteHandler(db *sql.DB, lg logging.Logging) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
-			lg.logMsg("non-DELETE request to /delete", LogInfo)
+			lg.LogMsg("non-DELETE request to /delete", logging.LogInfo)
 			http.Error(w, "Bad request", http.StatusMethodNotAllowed)
 		}
 
 		usernameBytes, err := io.ReadAll(r.Body)
 		if err != nil {
-			lg.logMsg("Could not decode request body", LogInfo)
+			lg.LogMsg("Could not decode request body", logging.LogInfo)
 			http.Error(w, fmt.Sprintf("Invalid request body: %s", err), http.StatusBadRequest)
 			return
 		}
 		username := string(usernameBytes)
 
-		err = deleteUser(db, username)
-		if _, ok := err.(ErrUserNotExists); ok {
+		err = database.DeleteUser(db, username)
+		if _, ok := err.(types.ErrUserNotExists); ok {
 			if _, err := io.WriteString(w, "User does not exist"); err != nil {
-				lg.logMsg(fmt.Sprintf("User deletion request failed: %s", err), LogInfo)
+				lg.LogMsg(fmt.Sprintf("User deletion request failed: %s", err), logging.LogInfo)
 				return
 			}
 			return
 		} else if err != nil {
-			lg.logMsg(fmt.Sprintf("Error deleting user: %s", err), LogError)
+			lg.LogMsg(fmt.Sprintf("Error deleting user: %s", err), logging.LogError)
 			http.Error(w, "Internal error", http.StatusInternalServerError)
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		if _, err := io.WriteString(w, "success"); err != nil {
-			lg.logMsg(fmt.Sprintf("Unable to send response: %s", err), LogInfo)
+			lg.LogMsg(fmt.Sprintf("Unable to send response: %s", err), logging.LogInfo)
 		}
 	}
 }
 
 // Handles a POST request containing userToBan struct (2 fields - username and ban)
-func newBanHandler(db *sql.DB, lg Logging) func(w http.ResponseWriter, r *http.Request) {
+func NewBanHandler(db *sql.DB, lg logging.Logging) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// if request is not POST, client recieves an error
 		if r.Method != http.MethodPost {
-			lg.logMsg("non-POST request to /admin/ban", LogInfo)
+			lg.LogMsg("non-POST request to /admin/ban", logging.LogInfo)
 			http.Error(w, "Bad request", http.StatusMethodNotAllowed)
 		}
 
 		// Deserialize userToBan struct
-		var user UserToBan
+		var user types.UserToBan
 		if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
-			lg.logMsg("Could not decode request body", LogInfo)
+			lg.LogMsg("Could not decode request body", logging.LogInfo)
 			http.Error(w, fmt.Sprintf("Invalid request body: %s", err), http.StatusBadRequest)
 			return
 		}
 
 		// Check if user is banned/unbanned already
-		banned, err := isBannedUser(db, user.Username)
+		banned, err := database.IsBannedUser(db, user.Username)
 		if err != nil {
-			if _, ok := err.(ErrUserNotExists); ok {
+			if _, ok := err.(types.ErrUserNotExists); ok {
 				if user.NewBanStatus {
-					lg.logMsg("Attempted to ban non-existing user", LogInfo)
+					lg.LogMsg("Attempted to ban non-existing user", logging.LogInfo)
 				} else {
-					lg.logMsg("Attempted to unban non-existing user", LogInfo)
+					lg.LogMsg("Attempted to unban non-existing user", logging.LogInfo)
 				}
 				if _, err := io.WriteString(w, "User does not exist"); err != nil {
-					lg.logMsg(fmt.Sprintf("User ban request failed: %s", err), LogInfo)
+					lg.LogMsg(fmt.Sprintf("User ban request failed: %s", err), logging.LogInfo)
 					return
 				}
 				return
 			}
 			if user.NewBanStatus {
-				lg.logMsg(fmt.Sprintf("Error banning user: %s", err), LogError)
+				lg.LogMsg(fmt.Sprintf("Error banning user: %s", err), logging.LogError)
 			} else {
-				lg.logMsg(fmt.Sprintf("Error unbanning user: %s", err), LogError)
+				lg.LogMsg(fmt.Sprintf("Error unbanning user: %s", err), logging.LogError)
 			}
 
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -219,47 +224,47 @@ func newBanHandler(db *sql.DB, lg Logging) func(w http.ResponseWriter, r *http.R
 		// Check if user is already banned/unbanned
 		if user.NewBanStatus == banned {
 			if _, err := io.WriteString(w, "Nothing changed"); err != nil {
-				lg.logMsg(fmt.Sprintf("Could not send response ti client: %s", err), LogInfo)
+				lg.LogMsg(fmt.Sprintf("Could not send response ti client: %s", err), logging.LogInfo)
 				return
 			}
 			if banned {
-				lg.logMsg(fmt.Sprintf("Attempted to ban a banned user: %s", user.Username), LogInfo)
+				lg.LogMsg(fmt.Sprintf("Attempted to ban a banned user: %s", user.Username), logging.LogInfo)
 			} else {
-				lg.logMsg(fmt.Sprintf("Attempted to unban a non-banned user: %s", user.Username), LogInfo)
+				lg.LogMsg(fmt.Sprintf("Attempted to unban a non-banned user: %s", user.Username), logging.LogInfo)
 			}
 			return
 		}
 		// Ban user
 		if user.NewBanStatus {
-			if err := banUser(db, user.Username); err != nil {
-				lg.logMsg(fmt.Sprintf("Error unbanning user: %s", err), LogError)
+			if err := database.BanUser(db, user.Username); err != nil {
+				lg.LogMsg(fmt.Sprintf("Error unbanning user: %s", err), logging.LogError)
 				http.Error(w, "Internal server error", http.StatusInternalServerError)
 				return
 			}
-			lg.logMsg(fmt.Sprintf("User %s banned", user.Username), LogInfo)
+			lg.LogMsg(fmt.Sprintf("User %s banned", user.Username), logging.LogInfo)
 			if _, err := io.WriteString(w, fmt.Sprintf("User %s banned", user.Username)); err != nil {
-				lg.logMsg(fmt.Sprintf("Could not send response to client: %s", err), LogInfo)
+				lg.LogMsg(fmt.Sprintf("Could not send response to client: %s", err), logging.LogInfo)
 			}
 			return
 		}
 		// Unban user
-		if err := unbanUser(db, user.Username); err != nil {
-			lg.logMsg(fmt.Sprintf("Error unbanning user: %s", err), LogError)
+		if err := database.UnbanUser(db, user.Username); err != nil {
+			lg.LogMsg(fmt.Sprintf("Error unbanning user: %s", err), logging.LogError)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
-		lg.logMsg(fmt.Sprintf("User %s unbanned", user.Username), LogInfo)
+		lg.LogMsg(fmt.Sprintf("User %s unbanned", user.Username), logging.LogInfo)
 		if _, err := io.WriteString(w, fmt.Sprintf("User %s unbanned", user.Username)); err != nil {
-			lg.logMsg(fmt.Sprintf("Could not send response to client: %s", err), LogInfo)
+			lg.LogMsg(fmt.Sprintf("Could not send response to client: %s", err), logging.LogInfo)
 		}
 	}
 }
 
 // Handles a POST request containing changeAdminStatus struct (2 fields - username and new status)
-func newSetAdminHandler(db *sql.DB, lg Logging) func(w http.ResponseWriter, r *http.Request) {
+func NewSetAdminHandler(db *sql.DB, lg logging.Logging) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			lg.logMsg("non-POST request to /admin/adminstatus", LogInfo)
+			lg.LogMsg("non-POST request to /admin/adminstatus", logging.LogInfo)
 			http.Error(w, "Bad request", http.StatusMethodNotAllowed)
 		}
 	}
@@ -268,10 +273,10 @@ func newSetAdminHandler(db *sql.DB, lg Logging) func(w http.ResponseWriter, r *h
 // Handles calculation requests
 // Expression is sent in plain text
 // Result is also sent in plain text
-func newCalcHandler(db *sql.DB, lg Logging) func(w http.ResponseWriter, r *http.Request) {
+func NewCalcHandler(db *sql.DB, lg logging.Logging) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			lg.logMsg("Incoming calculation request failed: bad request", LogInfo)
+			lg.LogMsg("Incoming calculation request failed: bad request", logging.LogInfo)
 			http.Error(w, "Bad request", http.StatusMethodNotAllowed)
 			return
 		}
@@ -279,7 +284,7 @@ func newCalcHandler(db *sql.DB, lg Logging) func(w http.ResponseWriter, r *http.
 		/* This part is partially finished logic for validating jwt tokens
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
-			lg.logMsg("Incomming calculation request failed: invalid authorization header format", LogInfo)
+			lg.LogMsg("Incomming calculation request failed: invalid authorization header format", LogInfo)
 			http.Error(w, "Invalid authorization header format", http.StatusUnauthorized)
 			return
 		}
@@ -294,27 +299,27 @@ func newCalcHandler(db *sql.DB, lg Logging) func(w http.ResponseWriter, r *http.
 		encodedExp := r.URL.Query().Get("exp")
 		if encodedExp == "" {
 			http.Error(w, "exp parameter missing", http.StatusBadRequest)
-			lg.logMsg("Incoming calculation request failed: expression parameter missing", LogInfo)
+			lg.LogMsg("Incoming calculation request failed: expression parameter missing", logging.LogInfo)
 			return
 		}
 
 		expBytes, err := base64.URLEncoding.DecodeString(encodedExp)
 		if err != nil {
 			http.Error(w, "Expression could not be decoded correctly", http.StatusBadRequest)
-			lg.logMsg("Incoming calculaton request failed: bad expression encoding", LogInfo)
+			lg.LogMsg("Incoming calculaton request failed: bad expression encoding", logging.LogInfo)
 			return
 		}
 		exp := string(expBytes)
-		result, err := calcExpression(exp, lg)
+		result, err := CalcExpression(exp, lg)
 		if err != nil {
 			http.Error(w, "Invalid expression", http.StatusBadRequest)
-			lg.logMsg("Incoming calculation request failed: invalid expression", LogInfo)
+			lg.LogMsg("Incoming calculation request failed: invalid expression", logging.LogInfo)
 			return
 		}
 		log.Println("Calculated expression:", exp, "result:", result)
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		if _, err := io.WriteString(w, result); err != nil {
-			lg.logMsg(fmt.Sprintf("Incoming calculation request failed: %s", err), LogInfo)
+			lg.LogMsg(fmt.Sprintf("Incoming calculation request failed: %s", err), logging.LogInfo)
 		}
 	}
 }
@@ -323,52 +328,52 @@ func newCalcHandler(db *sql.DB, lg Logging) func(w http.ResponseWriter, r *http.
 // Usernames are given as users query string, must be comma separated
 // If no usernames given, a list of all users is returned
 // Only GET requests allowed
-func newGetUsersHandler(db *sql.DB, lg Logging) func(w http.ResponseWriter, r *http.Request) {
+func NewGetUsersHandler(db *sql.DB, lg logging.Logging) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			lg.logMsg("Incoming user data request failed: invalid request method", LogInfo)
+			lg.LogMsg("Incoming user data request failed: invalid request method", logging.LogInfo)
 			http.Error(w, "Invalid method", http.StatusMethodNotAllowed)
 			return
 		}
 		defer r.Body.Close()
 
 		names := r.URL.Query().Get("users")
-		var users []DisplayedUserData
+		var users []types.DisplayedUserData
 		var err error
 		if names == "" {
-			users, err = listAllUsers(db)
+			users, err = database.ListAllUsers(db)
 			if err != nil {
-				lg.logMsg(fmt.Sprintf("Error accessing user database: %s", err), LogError)
+				lg.LogMsg(fmt.Sprintf("Error accessing user database: %s", err), logging.LogError)
 				http.Error(w, "Internal error", http.StatusInternalServerError)
 				return
 			}
-			lg.logMsg("Administrator requested list of all users", LogInfo)
+			lg.LogMsg("Administrator requested list of all users", logging.LogInfo)
 		} else {
 			namesSlice := strings.Split(names, ",")
-			users, err = listUsers(db, namesSlice)
+			users, err = database.ListUsers(db, namesSlice)
 			if err != nil {
-				lg.logMsg(fmt.Sprintf("Error accessing user database: %s", err), LogError)
+				lg.LogMsg(fmt.Sprintf("Error accessing user database: %s", err), logging.LogError)
 				http.Error(w, "Internal error", http.StatusInternalServerError)
 				return
 			}
-			lg.logMsg(fmt.Sprintf("Administrator requested list of users: %s", names), LogInfo)
+			lg.LogMsg(fmt.Sprintf("Administrator requested list of users: %s", names), logging.LogInfo)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(users)
 	}
 }
 
-func calcExpression(expression string, lg Logging) (string, error) {
+func CalcExpression(expression string, lg logging.Logging) (string, error) {
 	govalExp, err := govaluate.NewEvaluableExpression(expression)
 	if err != nil {
 		return "", err
 	}
 	result, err := govalExp.Evaluate(nil)
 	if err != nil {
-		lg.logMsg(fmt.Sprintf("Colud not calculate expression %s: %s", expression, err), LogWarning)
+		lg.LogMsg(fmt.Sprintf("Colud not calculate expression %s: %s", expression, err), logging.LogWarning)
 	}
 	if fmt.Sprint(result) == "<nil>" {
-		lg.logMsg(fmt.Sprintf("Colud not calculate expression %s: result is nil", expression), LogWarning)
+		lg.LogMsg(fmt.Sprintf("Colud not calculate expression %s: result is nil", expression), logging.LogWarning)
 	}
 	return fmt.Sprint(result), nil
 }

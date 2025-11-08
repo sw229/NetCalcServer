@@ -1,9 +1,11 @@
-package main
+package logging
 
 import (
 	"log"
 	"os"
 	"strings"
+
+	"github.com/sw229/netCalcServer/internal/types"
 )
 
 const (
@@ -18,14 +20,14 @@ type Logging struct {
 	Logfile *os.File
 }
 
-func initLog(logLevel int, logFilePath string) (Logging, error) {
+func InitLog(logLevel int, logFilePath string) (Logging, error) {
 	if logFilePath == "" {
 		return Logging{logLevel, os.Stdout}, nil
 	}
 	if strings.HasPrefix(logFilePath, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return Logging{}, ErrInvalidFile{"Could not open log file. Unable to locate user home directory. Try using absolute path to log file"}
+			return Logging{}, types.ErrInvalidFile{Message: "Could not open log file. Unable to locate user home directory. Try using absolute path to log file"}
 		}
 		logFilePath = home + "/" + logFilePath[2:]
 	}
@@ -37,7 +39,7 @@ func initLog(logLevel int, logFilePath string) (Logging, error) {
 	return Logging{logLevel, file}, nil
 }
 
-func (lg Logging) logMsg(msg string, msgType int) {
+func (lg Logging) LogMsg(msg string, msgType int) {
 	if lg.Level == 0 {
 		return
 	}

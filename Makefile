@@ -1,5 +1,5 @@
 build:
-	@go build -o bin/netcalcsrv
+	@go build -o bin/netcalcsrv ./cmd/netcalcsrv
 
 run: build
 	@./bin/netcalcsrv
