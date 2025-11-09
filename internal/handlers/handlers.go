@@ -199,6 +199,7 @@ func NewBanHandler(db *sql.DB, lg logging.Logging) func(w http.ResponseWriter, r
 
 		// Ban user
 		// database.BanUser also checks if user exists or is already banned
+		// handleBanError is used to handle these errors
 		if user.NewBanStatus {
 			if err := database.BanUser(db, user.Username); err != nil {
 				if handleBanError(err, lg, w, true) {
@@ -253,15 +254,77 @@ func handleBanError(err error, lg logging.Logging, w http.ResponseWriter, newBan
 	return false
 }
 
-// FINISH THIS
 // Handles a POST request containing changeAdminStatus struct (2 fields - username and new status)
 func NewSetAdminHandler(db *sql.DB, lg logging.Logging) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// If method is not POST, client recieves an error
 		if r.Method != http.MethodPost {
 			lg.LogMsg("non-POST request to /admin/adminstatus", logging.LogInfo)
-			http.Error(w, "Bad request", http.StatusMethodNotAllowed)
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
 		}
+
+		// Deserialize changeAdmisStatus struct
+		var user types.ChangeAdminStatus
+		if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
+			lg.LogMsg("Could not decode request body", logging.LogInfo)
+			http.Error(w, fmt.Sprintf("Invalid request body: %s", err), http.StatusBadRequest)
+			return
+		}
+
+		// Enable admin status.	database.EnableUserAdmin also checks if uder does not exist or is already an admin.
+		// handleAdminStatusError is used tho handle these errors.
+		if user.NewAdminStatus {
+			if err := database.EnableUserAdmin(db, user.Username); err != nil {
+				if handleAdminStatusError(err, lg, w, true) {
+					return
+				}
+				lg.LogMsg(fmt.Sprintf("Error enabling admin status for user: %s", err), logging.LogError)
+				http.Error(w, "Internal server error", http.StatusInternalServerError)
+				return
+			}
+			lg.LogMsg(fmt.Sprintf("Enabled admin status for user %s", user.Username), logging.LogInfo)
+			sendResponse(fmt.Sprintf("Enabled admin status for user %s", user.Username), w, lg)
+			return
+		}
+		// Disable admin staatus
+		if err := database.DisableUserAdmin(db, user.Username); err != nil {
+			if handleAdminStatusError(err, lg, w, false) {
+				return
+			}
+			lg.LogMsg(fmt.Sprintf("Error disabling admin status for user: %s", err), logging.LogError)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		lg.LogMsg(fmt.Sprintf("Disabled admin status for user %s", user.Username), logging.LogInfo)
+		sendResponse(fmt.Sprintf("Disabled admin status for user %s", user.Username), w, lg)
 	}
+}
+
+// Function checks the error returned by database.EnableUserAdmin, returns bool if successful
+// If error is ErrUserNotExists or ErrUserStatusUnchanged function returns true,
+// corresponding response is sent to the client, also everything is logged.
+// If it is any other error, function returns false
+func handleAdminStatusError(err error, lg logging.Logging, w http.ResponseWriter, newAdminStatus bool) bool {
+	switch err.(type) {
+	case types.ErrUserNotExists:
+		if newAdminStatus {
+			lg.LogMsg("Attempted to enable admin status for a non-existing user", logging.LogInfo)
+		} else {
+			lg.LogMsg("Attempted to disable admin status for a non-existing user", logging.LogInfo)
+		}
+		sendResponse("User does not exist", w, lg)
+		return true
+	case types.ErrUserStatusUnchanged:
+		if newAdminStatus {
+			lg.LogMsg("Attempted to ebable admin status for an admin", logging.LogInfo)
+		} else {
+			lg.LogMsg("Attempted to disable admin status for a non-admin", logging.LogInfo)
+		}
+		sendResponse("Nothing changed", w, lg)
+		return true
+	}
+	return false
 }
 
 // Handles calculation requests

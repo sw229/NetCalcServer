@@ -20,9 +20,7 @@ import (
 // Add authentication and admin functionality
 // Add ability to get database credentials from environment variables
 // Add ability to specify custom port for database
-// use toml or something like that for config file
 // LogToFile setting is unnecessary, log file has to be used only if path to is it given
-// Maybe split program into packages
 
 func main() {
 	settings := ui.GenSettings()
