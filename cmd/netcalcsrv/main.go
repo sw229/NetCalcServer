@@ -41,7 +41,7 @@ func main() {
 	http.HandleFunc("/calculate", handlers.NewCalcHandler(db, lg))
 	http.HandleFunc("/admin/getusers", handlers.NewGetUsersHandler(db, lg))
 	http.HandleFunc("/admin/ban", handlers.NewBanHandler(db, lg))
-	http.HandleFunc("admin/adminstatus", handlers.NewSetAdminHandler(db, lg))
+	http.HandleFunc("/admin/setadminstatus", handlers.NewSetAdminHandler(db, lg))
 	lg.LogMsg(fmt.Sprintf("Server starting on port %s", *settings.ServerPort), logging.LogInfo)
 	err = http.ListenAndServe(":"+*settings.ServerPort, nil)
 	if err != nil {
