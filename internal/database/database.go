@@ -1,4 +1,4 @@
-package main
+package database
 
 import (
 	"database/sql"
@@ -7,12 +7,16 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/sw229/netCalcServer/internal/types"
 	"golang.org/x/crypto/bcrypt"
 )
 
+type MysqlConnection struct {
+}
+
 // Function starts database connection. In golang sql.Open does not check if database is accessible
 // so db.Ping() is used to check this
-func initDB(settings Settings) (*sql.DB, error) {
+func InitDB(settings types.Settings) (*sql.DB, error) {
 	db, err := sql.Open("mysql", fmt.Sprintf("%s:%s@/%s", *settings.DBUsername, *settings.DBPassword, *settings.DBName))
 	if err != nil {
 		return nil, err
@@ -25,16 +29,16 @@ func initDB(settings Settings) (*sql.DB, error) {
 }
 
 // Function returns a list of ALL users
-func listAllUsers(db *sql.DB) ([]DisplayedUserData, error) {
+func ListAllUsers(db *sql.DB) ([]types.DisplayedUserData, error) {
 	rows, err := db.Query("SELECT username, date_created, is_admin, is_banned FROM users")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var users []DisplayedUserData
+	var users []types.DisplayedUserData
 
 	for rows.Next() {
-		var user DisplayedUserData
+		var user types.DisplayedUserData
 		var dateCreatedStr string
 		err := rows.Scan(&user.Username, &dateCreatedStr, &user.IsAdmin, &user.IsBanned)
 		if err != nil {
@@ -53,9 +57,9 @@ func listAllUsers(db *sql.DB) ([]DisplayedUserData, error) {
 }
 
 // Function returns a list of users with specified usernames
-// If a user is not present in the database, it is ignored
-func listUsers(db *sql.DB, usernames []string) ([]DisplayedUserData, error) {
-	users := []DisplayedUserData{}
+// Users absent from the database are ignored
+func ListUsers(db *sql.DB, usernames []string) ([]types.DisplayedUserData, error) {
+	users := []types.DisplayedUserData{}
 	placeholders := make([]string, len(usernames))
 	queryArgs := make([]interface{}, len(usernames))
 	for i, name := range usernames {
@@ -75,7 +79,7 @@ func listUsers(db *sql.DB, usernames []string) ([]DisplayedUserData, error) {
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var user DisplayedUserData
+		var user types.DisplayedUserData
 		var dateCreatedStr string
 		err = rows.Scan(&user.Username, &dateCreatedStr, &user.IsAdmin, &user.IsBanned)
 		if err != nil {
@@ -97,19 +101,19 @@ func listUsers(db *sql.DB, usernames []string) ([]DisplayedUserData, error) {
 // Returns ErrUserExists if user exists
 // Adds user with given username, password and admin status to "users" table
 // Bcrypt is used for password hashing
-func addUser(db *sql.DB, user UserCredentials) error {
+func AddUser(db *sql.DB, user types.UserCredentials) error {
 	exists, err := isUserExists(db, user.Username)
 	if err != nil {
 		return err
 	}
 	if exists {
-		return ErrUserExists{"Error addUser: User already exists"}
+		return types.ErrUserExists{Message: "Error addUser: User already exists"}
 	}
 	if !isValidUsername(user.Username) {
-		return ErrInvalidNameOrPasswd{"Error addUser: Invalid username"}
+		return types.ErrInvalidNameOrPasswd{Message: "Error addUser: Invalid username"}
 	}
 	if !isValidPasswd(user.Password) {
-		return ErrInvalidNameOrPasswd{"Error addUser: Invalid password"}
+		return types.ErrInvalidNameOrPasswd{Message: "Error addUser: Invalid password"}
 	}
 	userPasswdHash, err := bcrypt.GenerateFromPassword([]byte(user.Password), 12)
 	if err != nil {
@@ -123,13 +127,14 @@ func addUser(db *sql.DB, user UserCredentials) error {
 }
 
 // Function deletes specified user
-func deleteUser(db *sql.DB, username string) error {
+// Returns ErrUserNotExists if user does not exist
+func DeleteUser(db *sql.DB, username string) error {
 	exists, err := isUserExists(db, username)
 	if err != nil {
 		return err
 	}
 	if !exists {
-		return ErrUserNotExists{"Error deleteUser: User does not exist"}
+		return types.ErrUserNotExists{Message: "Error deleteUser: User does not exist"}
 	}
 	_, err = db.Exec("DELETE FROM users WHERE username = ?", username)
 	if err != nil {
@@ -138,38 +143,17 @@ func deleteUser(db *sql.DB, username string) error {
 	return nil
 }
 
-// Function checks if user exists
-func isUserExists(db *sql.DB, username string) (bool, error) {
-	var result string
-	row := db.QueryRow("SELECT 1 FROM users WHERE username=?", username)
-	err := row.Scan(&result)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return false, nil
-		} else {
-			return false, err
-		}
-	}
-	return true, nil
-}
-
 // Function checks if password is correct. Bcrypt is used for password hashing.
 // Returns ErrUserNotExists if user does not exist
 // Checks "passwd_hash" column "users" table
 // bcrypt is used for password hashing
-func isCorrectPassword(db *sql.DB, user UserCredentials) (bool, error) {
-	ok, err := isUserExists(db, user.Username)
-	if err != nil {
-		return false, err
-	} else if !ok {
-		return false, ErrUserNotExists{message: "Error isCorrectPassword: User does not exist"}
-	}
+func IsCorrectPassword(db *sql.DB, user types.UserCredentials) (bool, error) {
 	var userPasswdHash string
 	row := db.QueryRow("SELECT passwd_hash FROM users WHERE username=?", user.Username)
-	err = row.Scan(&userPasswdHash)
+	err := row.Scan(&userPasswdHash)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return false, ErrUserNotExists{message: "Error isCorrectPassword: User does not exist"}
+			return false, types.ErrUserNotExists{Message: "Error IsCorrectPassword: User does not exist"}
 		}
 		return false, err
 	}
@@ -183,21 +167,16 @@ func isCorrectPassword(db *sql.DB, user UserCredentials) (bool, error) {
 	return true, nil
 }
 
-// Function checks if user is banned
+// Function checks if user is banned, returns boolean
 // Returns ErrUserNotExists if user does not exist
-func isBannedUser(db *sql.DB, username string) (bool, error) {
-	ok, err := isUserExists(db, username)
-	if err != nil {
-		return false, err
-	} else if !ok {
-		return false, ErrUserNotExists{message: "Error isBannedUser: User does not exist"}
-	}
+// If error is encountered, functuin returns false
+func IsBannedUser(db *sql.DB, username string) (bool, error) {
 	var isBanned int
 	row := db.QueryRow("SELECT is_banned FROM users WHERE username=?", username)
-	err = row.Scan(&isBanned)
+	err := row.Scan(&isBanned)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return false, ErrUserNotExists{message: "Error isBannedUser: User does not exist"}
+			return false, types.ErrUserNotExists{Message: "Error IsBannedUser: User does not exist"}
 		}
 		return false, err
 	}
@@ -207,22 +186,16 @@ func isBannedUser(db *sql.DB, username string) (bool, error) {
 	return true, nil
 }
 
-// Function checks if user is admin
-// Returns ErrUserNotExists if user does not exist
-// Function returns boolean value
-func isAdmin(db *sql.DB, username string) (bool, error) {
-	ok, err := isUserExists(db, username)
-	if err != nil {
-		return false, err
-	} else if !ok {
-		return false, ErrUserNotExists{message: "Error isAdmin: User does not exist"}
-	}
+// Function checks if user is admin, returns boolean
+// ErrUserNotExists returned if user does not exist
+// If error is encountered, functuin returns false
+func IsAdmin(db *sql.DB, username string) (bool, error) {
 	var isAdmin int
 	row := db.QueryRow("SELECT is_admin FROM users WHERE username=?", username)
-	err = row.Scan(&isAdmin)
+	err := row.Scan(&isAdmin)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return false, ErrUserNotExists{message: "Error isAdmin: User does not exist"}
+			return false, types.ErrUserNotExists{Message: "Error isAdmin: User does not exist"}
 		}
 		return false, err
 	}
@@ -235,12 +208,12 @@ func isAdmin(db *sql.DB, username string) (bool, error) {
 // Function changes username from oldUsername to newUsername
 // ErrUserNotExists returned if user with oldUserName does not exist
 // ErrUserExist returned if user with newUserName already exists
-func changeUsername(db *sql.DB, oldUsername, newUsername string) error { // TODO: use transactions
+func ChangeUsername(db *sql.DB, oldUsername, newUsername string) error { // TODO: use transactions
 	ok, err := isUserExists(db, oldUsername)
 	if err != nil {
 		return err
 	} else if !ok {
-		return ErrUserNotExists{message: "Error changeUsername: User does not exist"}
+		return types.ErrUserNotExists{Message: "Error changeUsername: User does not exist"}
 	}
 
 	exists, err := isUserExists(db, newUsername)
@@ -248,7 +221,7 @@ func changeUsername(db *sql.DB, oldUsername, newUsername string) error { // TODO
 		return err
 	}
 	if exists {
-		return ErrUserExists{"Error changeUsername: Username taken"}
+		return types.ErrUserExists{Message: "Error changeUsername: Username taken"}
 	}
 
 	_, err = db.Exec("UPDATE users SET username=? WHERE username=?", newUsername, oldUsername)
@@ -261,15 +234,15 @@ func changeUsername(db *sql.DB, oldUsername, newUsername string) error { // TODO
 // Function changes user's password.
 // ErrInvalidPassword returned if password is invalid
 // ErrUserNotExists returned if user does not exist
-func changeUserPasswd(db *sql.DB, username string, newPasswd string) error {
+func ChangeUserPasswd(db *sql.DB, username string, newPasswd string) error {
 	ok, err := isUserExists(db, username)
 	if err != nil {
 		return err
 	} else if !ok {
-		return ErrUserNotExists{"Error: changeUserPasswd: User does not exist"}
+		return types.ErrUserNotExists{Message: "Error: changeUserPasswd: User does not exist"}
 	}
 	if !isValidPasswd(newPasswd) {
-		return ErrInvalidNameOrPasswd{"Error: changeUserPasswd: Invalid password"}
+		return types.ErrInvalidNameOrPasswd{Message: "Error: changeUserPasswd: Invalid password"}
 	}
 
 	userPasswdHash, err := bcrypt.GenerateFromPassword([]byte(newPasswd), 12)
@@ -283,16 +256,23 @@ func changeUserPasswd(db *sql.DB, username string, newPasswd string) error {
 	return nil
 }
 
-// Changes user's is_banned field to 1 regardless of its prior value
-// ErrUserNotExists returned if user does not exist
-func banUser(db *sql.DB, username string) error {
-	ok, err := isUserExists(db, username)
+// Changes user's is_banned field to 1
+// Returns ErrUserStatusUnchanged if user already banned
+// Returns ErrUserNotExists if user does not exist
+func BanUser(db *sql.DB, username string) error {
+	// Check if user does not exist or is banned
+	banned, err := IsBannedUser(db, username)
 	if err != nil {
+		if _, ok := err.(types.ErrUserNotExists); ok {
+			return types.ErrUserNotExists{Message: "BanUser: User does not exist"}
+		}
 		return err
-	} else if !ok {
-		return ErrUserNotExists{"Error: banUser: User does not exist"}
+	}
+	if banned {
+		return types.ErrUserStatusUnchanged{Message: "BanUser: Attempted to ban a banned user"}
 	}
 
+	// change is_banned to 1
 	_, err = db.Exec("UPDATE users SET is_banned=1 WHERE username=?", username)
 	if err != nil {
 		return err
@@ -300,16 +280,23 @@ func banUser(db *sql.DB, username string) error {
 	return nil
 }
 
-// Changes user's is_banned field to 0 regardless of its prior value
-// ErrUserNotExists returned if user does not exist
-func unbanUser(db *sql.DB, username string) error {
-	ok, err := isUserExists(db, username)
+// Changes user's is_banned field to 0
+// Returns ErrUserStatusUnchanged if user is not banned
+// Returns ErrUserNotExists if user does not exist
+func UnbanUser(db *sql.DB, username string) error {
+	// Check if user does not exist or is not banned
+	banned, err := IsBannedUser(db, username)
 	if err != nil {
+		if _, ok := err.(types.ErrUserNotExists); ok {
+			return types.ErrUserNotExists{Message: "UnbanUser: User does not exist"}
+		}
 		return err
-	} else if !ok {
-		return ErrUserNotExists{"Error: unbanUser: User does not exist"}
+	}
+	if !banned {
+		return types.ErrUserStatusUnchanged{Message: "UnbanUser: Attempted to unban a non-banned user"}
 	}
 
+	// change is_banned to 0
 	_, err = db.Exec("UPDATE users SET is_banned=0 WHERE username=?", username)
 	if err != nil {
 		return err
@@ -317,16 +304,23 @@ func unbanUser(db *sql.DB, username string) error {
 	return nil
 }
 
-// Changes user's is_admin field to 1 regardless of its prior value
-// ErrUserNotExists returned if user does not exist
-func enableUserAdmin(db *sql.DB, username string) error {
-	ok, err := isUserExists(db, username)
+// Changes user's is_admin field to 1
+// Returns ErrUserStatusUnchanged if user is already an admin
+// Returns ErrUserNotExists if user does not exist
+func EnableUserAdmin(db *sql.DB, username string) error {
+	// Check if user does not exist or is an admin
+	admin, err := IsAdmin(db, username)
 	if err != nil {
+		if _, ok := err.(types.ErrUserNotExists); ok {
+			return types.ErrUserNotExists{Message: "EnableUserAdmin: User does not exist"}
+		}
 		return err
-	} else if !ok {
-		return ErrUserNotExists{"Error: enableUserAdmin: User does not exist"}
+	}
+	if admin {
+		return types.ErrUserStatusUnchanged{Message: "EnableUserAdmin: Attempted to enable admin status for an admin"}
 	}
 
+	// is_admin changed to 1
 	_, err = db.Exec("UPDATE users SET is_admin=1 WHERE username=?", username)
 	if err != nil {
 		return err
@@ -334,16 +328,23 @@ func enableUserAdmin(db *sql.DB, username string) error {
 	return nil
 }
 
-// Changes user's is_admin field to 0 regardless of its prior value
-// ErrUserNotExists returned if user does not exist
-func disableUserAdmin(db *sql.DB, username string) error {
-	ok, err := isUserExists(db, username)
+// Changes user's is_admin field to 0
+// Returns ErrUserStatusUnchanged if user is already an admin
+// Returns ErrUserNotExists if user does not exist
+func DisableUserAdmin(db *sql.DB, username string) error {
+	// Check if user does not exist or is an admin
+	admin, err := IsAdmin(db, username)
 	if err != nil {
+		if _, ok := err.(types.ErrUserNotExists); ok {
+			return types.ErrUserNotExists{Message: "DisableUserAdmin: User does not exist"}
+		}
 		return err
-	} else if !ok {
-		return ErrUserNotExists{"Error: disableUserAdmin: User does not exist"}
+	}
+	if !admin {
+		return types.ErrUserStatusUnchanged{Message: "DisableUserAdmin: Attempted to disable admin status for non-admin"}
 	}
 
+	// is_admin changed to 0
 	_, err = db.Exec("UPDATE users SET is_admin=0 WHERE username=?", username)
 	if err != nil {
 		return err
@@ -351,7 +352,7 @@ func disableUserAdmin(db *sql.DB, username string) error {
 	return nil
 }
 
-func isValidPasswd(password string) bool { // TODO: add password validity check
+func isValidPasswd(password string) bool { // TODO: add better password validity check
 	if len(password) < 4 || len(password) > 100 {
 		return false
 	}
@@ -362,4 +363,19 @@ func isValidUsername(username string) bool { // TODO: add regex to check charact
 		return false
 	}
 	return true
+}
+
+// Function checks if user exists, returns boolean
+func isUserExists(db *sql.DB, username string) (bool, error) {
+	var result string
+	row := db.QueryRow("SELECT 1 FROM users WHERE username=?", username)
+	err := row.Scan(&result)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		} else {
+			return false, err
+		}
+	}
+	return true, nil
 }

@@ -1,4 +1,4 @@
-package main
+package types
 
 import "time"
 
@@ -51,36 +51,45 @@ type ChangeAdminStatus struct {
 
 // Returned if requested user does not exist
 type ErrUserNotExists struct {
-	message string
+	Message string
 }
 
 func (err ErrUserNotExists) Error() string {
-	return err.message
+	return err.Message
 }
 
 // Returned if user with specific username already exists
 type ErrUserExists struct {
-	message string
+	Message string
 }
 
 func (err ErrUserExists) Error() string {
-	return err.message
+	return err.Message
 }
 
 // Returned if username or password are invalid
 type ErrInvalidNameOrPasswd struct {
-	message string
+	Message string
 }
 
 func (err ErrInvalidNameOrPasswd) Error() string {
-	return err.message
+	return err.Message
+}
+
+// Returned when attempting to ban a banned user, set admin rights for an admin, etc.
+type ErrUserStatusUnchanged struct {
+	Message string
+}
+
+func (err ErrUserStatusUnchanged) Error() string {
+	return err.Message
 }
 
 // Returned if file is invalid
 type ErrInvalidFile struct {
-	message string
+	Message string
 }
 
 func (err ErrInvalidFile) Error() string {
-	return err.message
+	return err.Message
 }

@@ -1,9 +1,11 @@
-package main
+package logging
 
 import (
 	"log"
 	"os"
 	"strings"
+
+	"github.com/sw229/netCalcServer/internal/types"
 )
 
 const (
@@ -14,18 +16,18 @@ const (
 )
 
 type Logging struct {
-	Level   int
-	Logfile *os.File
+	level   int      //Logging level. 0 logs nothing, 1 logs errors, 2 logs errors+warinngs, 3 logs everything
+	logfile *os.File // File where to store logs
 }
 
-func initLog(logLevel int, logFilePath string) (Logging, error) {
-	if logFilePath == "" {
+func InitLog(logLevel int, logToFile bool, logFilePath string) (Logging, error) {
+	if !logToFile || logFilePath == "" {
 		return Logging{logLevel, os.Stdout}, nil
 	}
 	if strings.HasPrefix(logFilePath, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return Logging{}, ErrInvalidFile{"Could not open log file. Unable to locate user home directory. Try using absolute path to log file"}
+			return Logging{}, types.ErrInvalidFile{Message: "Could not open log file. Unable to locate user home directory. Try using absolute path to log file"}
 		}
 		logFilePath = home + "/" + logFilePath[2:]
 	}
@@ -37,11 +39,11 @@ func initLog(logLevel int, logFilePath string) (Logging, error) {
 	return Logging{logLevel, file}, nil
 }
 
-func (lg Logging) logMsg(msg string, msgType int) {
-	if lg.Level == 0 {
+func (lg Logging) LogMsg(msg string, msgType int) {
+	if lg.level == 0 {
 		return
 	}
-	if lg.Level-msgType > 0 {
+	if lg.level-msgType > 0 {
 		msgTypeString := ""
 		switch msgType {
 		case 0:

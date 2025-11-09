@@ -1,4 +1,4 @@
-package main
+package ui
 
 import (
 	"bufio"
@@ -7,13 +7,15 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+
+	"github.com/sw229/netCalcServer/internal/types"
 )
 
 // Function processes command line arguments to set values to respective Settings fields
 // Also returns the path to config file. If it is not given as an argument, default value is returned
 // Values passed as flags override those from the configuration file
-func processArgs() (Settings, string) {
-	settings := Settings{}
+func processArgs() (types.Settings, string) {
+	settings := types.Settings{}
 	confPath := "~/.config/netcalcsrv.conf"
 
 	args := os.Args[1:]
@@ -55,7 +57,8 @@ func processArgs() (Settings, string) {
 			}
 			settings.LogLevel = &logLevel
 		} else {
-			fmt.Fprintf(os.Stderr, "ERROR: Invalid option %s\nUse --help for help", arg)
+			fmt.Fprintf(os.Stderr, "ERROR: Invalid option %s\nUse --help for help\n", arg)
+			os.Exit(2)
 		}
 	}
 	return settings, confPath
@@ -71,18 +74,18 @@ func processArgs() (Settings, string) {
 // db_name=NAME                equivalent to Settings.DBName
 // db_username=NAME            equivalent to Settings.DBUsername
 // db_password=PASSWORD        equivalent to Settings.DBPassword
-func readConfigFile(confPath string) (Settings, error) {
+func ReadConfigFile(confPath string) (types.Settings, error) {
 	if strings.HasPrefix(confPath, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return Settings{}, ErrInvalidFile{"Could not open config file. Unable to locate user home directory. Try using absolute path to config file"}
+			return types.Settings{}, types.ErrInvalidFile{Message: "Could not open config file. Unable to locate user home directory. Try using absolute path to config file"}
 		}
 		confPath = home + "/" + confPath[2:]
 	}
-	settings := Settings{}
+	settings := types.Settings{}
 	file, err := os.Open(confPath)
 	if err != nil {
-		return Settings{}, err
+		return types.Settings{}, err
 	}
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -130,7 +133,7 @@ func readConfigFile(confPath string) (Settings, error) {
 		}
 	}
 	if err = scanner.Err(); err != nil {
-		return Settings{}, err
+		return types.Settings{}, err
 	}
 
 	return settings, nil
@@ -145,9 +148,9 @@ func readConfigFile(confPath string) (Settings, error) {
 // If only database username is given, user is prompted for password.
 // If only password is given, user is prompted for both because this is stupid.
 // If any other setting is not given, os.Exit(2) is called.
-func genSettings() Settings {
+func GenSettings() types.Settings {
 	argSettings, confPath := processArgs()
-	confSettings, err := readConfigFile(confPath)
+	confSettings, err := ReadConfigFile(confPath)
 
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR: error reading config file at %s\n%s\n", confPath, err)

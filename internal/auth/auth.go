@@ -1,10 +1,11 @@
-package main
+package auth
 
 import (
 	"math/rand"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/sw229/netCalcServer/internal/types"
 )
 
 // Function randomly generates secret for jwt tokens
@@ -18,7 +19,7 @@ func genSecret() []byte {
 }
 
 // New secret is generated every time the server starts
-var secret = genSecret()
+var Secret = genSecret()
 
 // jwt token claims
 type Claims struct {
@@ -29,7 +30,7 @@ type Claims struct {
 }
 
 // Function generates jwt token. Not sure if this works
-func genJwt(user UserCredentials, secret []byte) (string, error) {
+func GenJwt(user types.UserCredentials, secret []byte) (string, error) {
 	expTime := time.Now().Add(10 * time.Minute)
 	claims := &Claims{
 		Username: user.Username,
