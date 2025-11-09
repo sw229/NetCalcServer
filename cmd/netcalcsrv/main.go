@@ -13,7 +13,7 @@ import (
 )
 
 // TODO:
-// BUG: server creates log file on startup even when enable_log_file=false
+// Check log level logic
 // Add enable/disable admin handlers
 // Use encoding/json/v2
 // Add success/failure messages for all requests
@@ -26,7 +26,7 @@ import (
 
 func main() {
 	settings := ui.GenSettings()
-	lg, err := logging.InitLog(*settings.LogLevel, *settings.LogFilePath)
+	lg, err := logging.InitLog(*settings.LogLevel, *settings.LogToFile, *settings.LogFilePath)
 	if err != nil {
 		log.Fatal(err)
 	}

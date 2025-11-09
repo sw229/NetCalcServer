@@ -20,8 +20,8 @@ type Logging struct {
 	logfile *os.File // File where to store logs
 }
 
-func InitLog(logLevel int, logFilePath string) (Logging, error) {
-	if logFilePath == "" {
+func InitLog(logLevel int, logToFile bool, logFilePath string) (Logging, error) {
+	if !logToFile || logFilePath == "" {
 		return Logging{logLevel, os.Stdout}, nil
 	}
 	if strings.HasPrefix(logFilePath, "~/") {
