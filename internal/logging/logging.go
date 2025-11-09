@@ -16,8 +16,8 @@ const (
 )
 
 type Logging struct {
-	Level   int
-	Logfile *os.File
+	level   int      //Logging level. 0 logs nothing, 1 logs errors, 2 logs errors+warinngs, 3 logs everything
+	logfile *os.File // File where to store logs
 }
 
 func InitLog(logLevel int, logFilePath string) (Logging, error) {
@@ -40,10 +40,10 @@ func InitLog(logLevel int, logFilePath string) (Logging, error) {
 }
 
 func (lg Logging) LogMsg(msg string, msgType int) {
-	if lg.Level == 0 {
+	if lg.level == 0 {
 		return
 	}
-	if lg.Level-msgType > 0 {
+	if lg.level-msgType > 0 {
 		msgTypeString := ""
 		switch msgType {
 		case 0:

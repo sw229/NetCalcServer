@@ -13,6 +13,7 @@ import (
 )
 
 // TODO:
+// BUG: server creates log file on startup even when enable_log_file=false
 // Add enable/disable admin handlers
 // Use encoding/json/v2
 // Add success/failure messages for all requests

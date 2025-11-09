@@ -201,19 +201,7 @@ func NewBanHandler(db *sql.DB, lg logging.Logging) func(w http.ResponseWriter, r
 		// database.BanUser also checks if user exists or is already banned
 		if user.NewBanStatus {
 			if err := database.BanUser(db, user.Username); err != nil {
-				if _, ok := err.(types.ErrUserNotExists); ok {
-					lg.LogMsg("Attempted to ban a non-existing user", logging.LogInfo)
-					if _, err := io.WriteString(w, "User does not exist"); err != nil {
-						lg.LogMsg(fmt.Sprintf("Unable to send response to client: %s", err), logging.LogInfo)
-						return
-					}
-					return
-				} else if _, ok := err.(types.ErrUserStatusUnchanged); ok {
-					lg.LogMsg("Attempted to ban a banned user", logging.LogInfo)
-					if _, err := io.WriteString(w, "Nothing changed"); err != nil {
-						lg.LogMsg(fmt.Sprintf("Unable to send response to client: %s", err), logging.LogInfo)
-						return
-					}
+				if handleBanError(err, lg, w, true) {
 					return
 				}
 				lg.LogMsg(fmt.Sprintf("Error banning user: %s", err), logging.LogError)
@@ -221,27 +209,13 @@ func NewBanHandler(db *sql.DB, lg logging.Logging) func(w http.ResponseWriter, r
 				return
 			}
 			lg.LogMsg(fmt.Sprintf("User %s banned", user.Username), logging.LogInfo)
-			if _, err := io.WriteString(w, fmt.Sprintf("User %s banned", user.Username)); err != nil {
-				lg.LogMsg(fmt.Sprintf("Could not send response to client: %s", err), logging.LogInfo)
-			}
+			sendResponse(fmt.Sprintf("User %s banned", user.Username), w, lg)
 			return
 		}
 		// Unban user
 		// database.UnbanUser also checks if user exists or is not banned
 		if err := database.UnbanUser(db, user.Username); err != nil {
-			if _, ok := err.(types.ErrUserNotExists); ok {
-				lg.LogMsg("Attempted to unban a non-existing user", logging.LogInfo)
-				if _, err := io.WriteString(w, "User does not exist"); err != nil {
-					lg.LogMsg(fmt.Sprintf("Unable to send response to client: %s", err), logging.LogInfo)
-					return
-				}
-				return
-			} else if _, ok := err.(types.ErrUserStatusUnchanged); ok {
-				lg.LogMsg("Attempted to unban a non-banned user", logging.LogInfo)
-				if _, err := io.WriteString(w, "Nothing changed"); err != nil {
-					lg.LogMsg(fmt.Sprintf("Unable to send response to client: %s", err), logging.LogInfo)
-					return
-				}
+			if handleBanError(err, lg, w, false) {
 				return
 			}
 			lg.LogMsg(fmt.Sprintf("Error unbanning user: %s", err), logging.LogError)
@@ -249,10 +223,34 @@ func NewBanHandler(db *sql.DB, lg logging.Logging) func(w http.ResponseWriter, r
 			return
 		}
 		lg.LogMsg(fmt.Sprintf("User %s unbanned", user.Username), logging.LogInfo)
-		if _, err := io.WriteString(w, fmt.Sprintf("User %s unbanned", user.Username)); err != nil {
-			lg.LogMsg(fmt.Sprintf("Could not send response to client: %s", err), logging.LogInfo)
-		}
+		sendResponse(fmt.Sprintf("User %s unbanned", user.Username), w, lg)
 	}
+}
+
+// Function checks the error returned by database.BanUser, returns bool if successful
+// If error is ErrUserNotExists or ErrUserStatusUnchanged function returns true,
+// corresponding response is sent to the client, also everything is logged.
+// If it is any other error, function returns false
+func handleBanError(err error, lg logging.Logging, w http.ResponseWriter, newBanStatus bool) bool {
+	switch err.(type) {
+	case types.ErrUserNotExists:
+		if newBanStatus {
+			lg.LogMsg("Attempted to ban a non-existing user", logging.LogInfo)
+		} else {
+			lg.LogMsg("Attempted to unban a non-existing user", logging.LogInfo)
+		}
+		sendResponse("User does not exist", w, lg)
+		return true
+	case types.ErrUserStatusUnchanged:
+		if newBanStatus {
+			lg.LogMsg("Attempted to ban a banned user", logging.LogInfo)
+		} else {
+			lg.LogMsg("Attempted to unban a non-banned user", logging.LogInfo)
+		}
+		sendResponse("Nothing changed", w, lg)
+		return true
+	}
+	return false
 }
 
 // FINISH THIS
@@ -306,7 +304,7 @@ func NewCalcHandler(db *sql.DB, lg logging.Logging) func(w http.ResponseWriter, 
 			return
 		}
 		exp := string(expBytes)
-		result, err := CalcExpression(exp, lg)
+		result, err := calcExpression(exp, lg)
 		if err != nil {
 			http.Error(w, "Invalid expression", http.StatusBadRequest)
 			lg.LogMsg("Incoming calculation request failed: invalid expression", logging.LogInfo)
@@ -359,7 +357,16 @@ func NewGetUsersHandler(db *sql.DB, lg logging.Logging) func(w http.ResponseWrit
 	}
 }
 
-func CalcExpression(expression string, lg logging.Logging) (string, error) {
+// Function sends given message to the client as http response, logs any errors.
+func sendResponse(message string, w http.ResponseWriter, lg logging.Logging) {
+	if _, err := io.WriteString(w, message); err != nil {
+		lg.LogMsg(fmt.Sprintf("Unable to send response to client: %s", err), logging.LogInfo)
+	}
+}
+
+// Function calculates the result of an expressin passed as string, logs any errors
+// Result is returned as string
+func calcExpression(expression string, lg logging.Logging) (string, error) {
 	govalExp, err := govaluate.NewEvaluableExpression(expression)
 	if err != nil {
 		return "", err
